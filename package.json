@@ -1,0 +1,19 @@
+{
+  "name": "castle-wars-game",
+  "version": "1.0.0",
+  "displayName": "Castle Wars",
+  "description": "基于魔兽争霸DLC《城堡战争》的2.5D多人对战手游",
+  "unity": "2021.3",
+  "dependencies": {
+    "com.unity.netcode.gameobjects": "1.7.0",
+    "com.unity.render-pipelines.universal": "12.1.13",
+    "com.unity.textmeshpro": "3.0.6",
+    "com.unity.ugui": "1.0.0"
+  },
+  "keywords": [
+    "castle wars",
+    "multiplayer",
+    "strategy",
+    "mobile game"
+  ]
+}
