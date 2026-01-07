@@ -3,12 +3,14 @@ using UnityEngine.UI;
 using TMPro;
 using CastleWars.Data;
 using CastleWars.Economy;
+using CastleWars.Core;
 using System.Collections.Generic;
 
 namespace CastleWars.UI
 {
     /// <summary>
     /// 建筑UI - 显示可建造的建筑列表
+    /// 支持本地模式和网络模式
     /// </summary>
     public class BuildingUI : MonoBehaviour
     {
@@ -22,6 +24,7 @@ namespace CastleWars.UI
 
         private BuildingManager buildingManager;
         private PlayerEconomy economy;
+        private LocalPlayer localPlayer;
         private List<BuildingButton> buildingButtons = new List<BuildingButton>();
 
         private int selectedSlot = -1;
@@ -29,35 +32,51 @@ namespace CastleWars.UI
         private void Start()
         {
             // 获取本地玩家的组件
-            var localPlayer = FindLocalPlayer();
-            if (localPlayer != null)
-            {
-                buildingManager = localPlayer.GetComponent<BuildingManager>();
-                economy = localPlayer.GetComponent<PlayerEconomy>();
-            }
+            FindPlayerComponents();
 
             // 创建建筑按钮
             CreateBuildingButtons();
 
             // 隐藏面板
-            buildingPanel.SetActive(false);
+            if (buildingPanel != null)
+            {
+                buildingPanel.SetActive(false);
+            }
+        }
+
+        private void FindPlayerComponents()
+        {
+            // 优先使用本地模式
+            if (LocalGameMode.IsLocalMode && LocalGameMode.Instance != null)
+            {
+                localPlayer = LocalGameMode.Instance.GetPlayer(1);
+                return;
+            }
+
+            // 网络模式
+            var playerObj = FindLocalPlayer();
+            if (playerObj != null)
+            {
+                buildingManager = playerObj.GetComponent<BuildingManager>();
+                economy = playerObj.GetComponent<PlayerEconomy>();
+            }
         }
 
         private GameObject FindLocalPlayer()
         {
-            var networkPlayers = FindObjectsOfType<CastleWars.Core.NetworkPlayer>();
+            var networkPlayers = FindObjectsOfType<NetworkPlayer>();
             foreach (var player in networkPlayers)
             {
-                if (player.IsOwner)
-                {
-                    return player.gameObject;
-                }
+                // 本地模式下使用第一个玩家
+                return player.gameObject;
             }
             return null;
         }
 
         private void CreateBuildingButtons()
         {
+            if (buildingButtonPrefab == null || buildingListContainer == null) return;
+
             foreach (BuildingData building in availableBuildings)
             {
                 GameObject buttonObj = Instantiate(buildingButtonPrefab, buildingListContainer);
@@ -77,9 +96,11 @@ namespace CastleWars.UI
         public void ShowBuildingPanel(int slotIndex)
         {
             selectedSlot = slotIndex;
-            buildingPanel.SetActive(true);
+            if (buildingPanel != null)
+            {
+                buildingPanel.SetActive(true);
+            }
 
-            // 更新按钮状态
             UpdateButtonStates();
         }
 
@@ -88,35 +109,47 @@ namespace CastleWars.UI
         /// </summary>
         public void HideBuildingPanel()
         {
-            buildingPanel.SetActive(false);
+            if (buildingPanel != null)
+            {
+                buildingPanel.SetActive(false);
+            }
             selectedSlot = -1;
         }
 
         private void OnBuildingSelected(BuildingData buildingData)
         {
-            if (selectedSlot < 0 || buildingManager == null) return;
+            if (selectedSlot < 0) return;
 
-            // 尝试建造
-            buildingManager.TryBuildBuilding(buildingData, selectedSlot);
+            if (buildingManager != null)
+            {
+                buildingManager.TryBuildBuilding(buildingData, selectedSlot);
+            }
 
-            // 关闭面板
             HideBuildingPanel();
         }
 
         private void UpdateButtonStates()
         {
-            if (economy == null) return;
+            int currentGold = 0;
+
+            if (LocalGameMode.IsLocalMode && localPlayer != null)
+            {
+                currentGold = localPlayer.Gold;
+            }
+            else if (economy != null)
+            {
+                currentGold = economy.Gold;
+            }
 
             foreach (var button in buildingButtons)
             {
-                button.UpdateState(economy.Gold);
+                button.UpdateState(currentGold);
             }
         }
 
         private void Update()
         {
-            // 实时更新按钮状态
-            if (buildingPanel.activeSelf)
+            if (buildingPanel != null && buildingPanel.activeSelf)
             {
                 UpdateButtonStates();
             }
@@ -142,12 +175,10 @@ namespace CastleWars.UI
             buildingData = data;
             onClickCallback = onClick;
 
-            // 设置UI
-            if (iconImage != null) iconImage.sprite = data.icon;
+            if (iconImage != null && data.icon != null) iconImage.sprite = data.icon;
             if (nameText != null) nameText.text = data.buildingName;
             if (costText != null) costText.text = $"{data.goldCost} Gold";
 
-            // 绑定点击事件
             if (button != null)
             {
                 button.onClick.AddListener(OnButtonClicked);
@@ -156,7 +187,8 @@ namespace CastleWars.UI
 
         public void UpdateState(int currentGold)
         {
-            // 根据金币数量启用/禁用按钮
+            if (buildingData == null) return;
+
             bool canAfford = currentGold >= buildingData.goldCost;
 
             if (button != null)
@@ -164,7 +196,6 @@ namespace CastleWars.UI
                 button.interactable = canAfford;
             }
 
-            // 改变颜色提示
             if (costText != null)
             {
                 costText.color = canAfford ? Color.green : Color.red;

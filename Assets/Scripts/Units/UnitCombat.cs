@@ -1,11 +1,13 @@
 using UnityEngine;
 using CastleWars.Data;
 using CastleWars.Combat;
+using CastleWars.Core;
 
 namespace CastleWars.Units
 {
     /// <summary>
     /// 单位战斗控制
+    /// 支持本地模式和网络模式
     /// </summary>
     public class UnitCombat : MonoBehaviour
     {
@@ -14,10 +16,10 @@ namespace CastleWars.Units
 
         [Header("战斗设置")]
         public LayerMask enemyLayer;
-        public Transform attackPoint; // 攻击点（发射子弹位置）
+        public Transform attackPoint;
 
         [Header("投射物")]
-        public GameObject projectilePrefab; // 远程单位的投射物
+        public GameObject projectilePrefab;
 
         private void Awake()
         {
@@ -29,9 +31,11 @@ namespace CastleWars.Units
         /// </summary>
         public Transform FindNearestEnemy(int myOwnerId)
         {
+            if (unitBase == null || unitBase.unitData == null) return null;
+
             Collider[] colliders = Physics.OverlapSphere(
                 transform.position,
-                unitBase.unitData.attackRange * 2, // 搜索范围稍大于攻击范围
+                unitBase.unitData.attackRange * 2,
                 enemyLayer
             );
 
@@ -40,19 +44,35 @@ namespace CastleWars.Units
 
             foreach (Collider col in colliders)
             {
+                // 本地模式检查LocalUnit
+                if (LocalGameMode.IsLocalMode)
+                {
+                    LocalUnit localEnemy = col.GetComponent<LocalUnit>();
+                    if (localEnemy != null && localEnemy.OwnerId != myOwnerId && !localEnemy.IsDead)
+                    {
+                        float distance = Vector3.Distance(transform.position, col.transform.position);
+                        if (distance < nearestDistance)
+                        {
+                            nearestDistance = distance;
+                            nearest = col.transform;
+                        }
+                    }
+                    continue;
+                }
+
+                // 网络模式检查UnitBase
                 UnitBase enemy = col.GetComponent<UnitBase>();
                 if (enemy == null) continue;
 
-                // 检查是否是敌人
-                if (enemy.ownerId.Value == myOwnerId) continue;
+                int enemyOwnerId = GetUnitOwnerId(enemy);
+                if (enemyOwnerId == myOwnerId) continue;
 
-                // 检查类型匹配（地面单位不能攻击空中）
                 if (!CanAttackTarget(enemy)) continue;
 
-                float distance = Vector3.Distance(transform.position, col.transform.position);
-                if (distance < nearestDistance)
+                float dist = Vector3.Distance(transform.position, col.transform.position);
+                if (dist < nearestDistance)
                 {
-                    nearestDistance = distance;
+                    nearestDistance = dist;
                     nearest = col.transform;
                 }
             }
@@ -60,15 +80,31 @@ namespace CastleWars.Units
             return nearest;
         }
 
+        private int GetUnitOwnerId(UnitBase unit)
+        {
+#if UNITY_NETCODE
+            return unit.ownerId.Value;
+#else
+            return unit.OwnerIdValue;
+#endif
+        }
+
+        private int GetMyOwnerId()
+        {
+#if UNITY_NETCODE
+            return unitBase.ownerId.Value;
+#else
+            return unitBase.OwnerIdValue;
+#endif
+        }
+
         private bool CanAttackTarget(UnitBase target)
         {
-            // 如果目标是空中单位，检查是否能攻击空中
             if (target.unitData.unitType == UnitType.Air)
             {
                 return unitBase.unitData.canAttackAir;
             }
-
-            return true; // 所有单位都能攻击地面单位
+            return true;
         }
 
         /// <summary>
@@ -76,9 +112,8 @@ namespace CastleWars.Units
         /// </summary>
         public void Attack(Transform target)
         {
-            if (target == null) return;
+            if (target == null || unitBase == null || unitBase.unitData == null) return;
 
-            // 检查攻击冷却
             if (Time.time < lastAttackTime + (1f / unitBase.unitData.attackSpeed))
             {
                 return;
@@ -86,34 +121,62 @@ namespace CastleWars.Units
 
             lastAttackTime = Time.time;
 
-            // 转向目标
             Vector3 direction = (target.position - transform.position).normalized;
             transform.rotation = Quaternion.LookRotation(new Vector3(direction.x, 0, direction.z));
 
+            // 本地模式攻击LocalUnit
+            if (LocalGameMode.IsLocalMode)
+            {
+                LocalUnit localTarget = target.GetComponent<LocalUnit>();
+                if (localTarget != null)
+                {
+                    PerformAttackLocal(localTarget);
+                    return;
+                }
+            }
+
+            // 网络模式攻击UnitBase
             UnitBase targetUnit = target.GetComponent<UnitBase>();
-            if (targetUnit == null) return;
+            if (targetUnit != null)
+            {
+                if (unitBase.unitData.attackType == AttackType.Melee)
+                {
+                    PerformMeleeAttack(targetUnit);
+                }
+                else
+                {
+                    PerformRangedAttack(target);
+                }
+            }
+        }
+
+        private void PerformAttackLocal(LocalUnit target)
+        {
+            PlayAttackAnimation();
 
             if (unitBase.unitData.attackType == AttackType.Melee)
             {
-                // 近战直接造成伤害
-                PerformMeleeAttack(targetUnit);
+                int myOwnerId = GetMyOwnerId();
+                target.TakeDamage(unitBase.unitData.attackDamage, myOwnerId);
+
+                if (unitBase.unitData.hasAOE)
+                {
+                    PerformAOEDamageLocal(target.transform.position);
+                }
             }
             else
             {
-                // 远程发射投射物
-                PerformRangedAttack(target);
+                PerformRangedAttack(target.transform);
             }
         }
 
         private void PerformMeleeAttack(UnitBase target)
         {
-            // 播放攻击动画
             PlayAttackAnimation();
 
-            // 对目标造成伤害
-            target.TakeDamageServerRpc(unitBase.unitData.attackDamage, (int)unitBase.ownerId.Value);
+            int myOwnerId = GetMyOwnerId();
+            target.TakeDamage(unitBase.unitData.attackDamage, myOwnerId);
 
-            // AOE伤害
             if (unitBase.unitData.hasAOE)
             {
                 PerformAOEDamage(target.transform.position);
@@ -122,10 +185,8 @@ namespace CastleWars.Units
 
         private void PerformRangedAttack(Transform target)
         {
-            // 播放攻击动画
             PlayAttackAnimation();
 
-            // 生成投射物
             if (projectilePrefab != null)
             {
                 Vector3 spawnPos = attackPoint != null ? attackPoint.position : transform.position + Vector3.up;
@@ -134,10 +195,11 @@ namespace CastleWars.Units
                 ProjectileController projController = projectile.GetComponent<ProjectileController>();
                 if (projController != null)
                 {
+                    int myOwnerId = GetMyOwnerId();
                     projController.Initialize(
                         target,
                         unitBase.unitData.attackDamage,
-                        (int)unitBase.ownerId.Value,
+                        myOwnerId,
                         unitBase.unitData.hasAOE,
                         unitBase.unitData.aoeRadius
                     );
@@ -145,27 +207,38 @@ namespace CastleWars.Units
             }
         }
 
+        private void PerformAOEDamageLocal(Vector3 center)
+        {
+            Collider[] hits = Physics.OverlapSphere(center, unitBase.unitData.aoeRadius, enemyLayer);
+            int myOwnerId = GetMyOwnerId();
+
+            foreach (Collider hit in hits)
+            {
+                LocalUnit enemy = hit.GetComponent<LocalUnit>();
+                if (enemy != null && enemy.OwnerId != myOwnerId)
+                {
+                    enemy.TakeDamage(unitBase.unitData.attackDamage * 0.5f, myOwnerId);
+                }
+            }
+        }
+
         private void PerformAOEDamage(Vector3 center)
         {
             Collider[] hits = Physics.OverlapSphere(center, unitBase.unitData.aoeRadius, enemyLayer);
+            int myOwnerId = GetMyOwnerId();
 
             foreach (Collider hit in hits)
             {
                 UnitBase enemy = hit.GetComponent<UnitBase>();
-                if (enemy != null && enemy.ownerId.Value != unitBase.ownerId.Value)
+                if (enemy != null && GetUnitOwnerId(enemy) != myOwnerId)
                 {
-                    // AOE伤害通常是主伤害的一部分
-                    enemy.TakeDamageServerRpc(
-                        unitBase.unitData.attackDamage * 0.5f,
-                        (int)unitBase.ownerId.Value
-                    );
+                    enemy.TakeDamage(unitBase.unitData.attackDamage * 0.5f, myOwnerId);
                 }
             }
         }
 
         private void PlayAttackAnimation()
         {
-            // 触发攻击动画
             Animator animator = GetComponent<Animator>();
             if (animator != null)
             {

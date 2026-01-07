@@ -4,6 +4,16 @@ using CastleWars.Data;
 namespace CastleWars.Core
 {
     /// <summary>
+    /// 本地单位状态枚举
+    /// </summary>
+    public enum LocalUnitState
+    {
+        Moving,
+        Fighting,
+        Dead
+    }
+
+    /// <summary>
     /// 本地单位 - 在本地模式下管理单位状态
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
@@ -17,7 +27,7 @@ namespace CastleWars.Core
 
         [Header("状态")]
         private float currentHealth;
-        private UnitState currentState = UnitState.Moving;
+        private LocalUnitState currentState = LocalUnitState.Moving;
         private Transform currentTarget;
 
         // 组件
@@ -58,9 +68,8 @@ namespace CastleWars.Core
             }
 
             currentHealth = MaxHealth;
-            currentState = UnitState.Moving;
+            currentState = LocalUnitState.Moving;
 
-            // 设置颜色以区分阵营
             SetTeamColor();
 
             Debug.Log($"Unit spawned for player {ownerId}");
@@ -78,10 +87,9 @@ namespace CastleWars.Core
         private void Update()
         {
             if (!LocalGameMode.IsLocalMode) return;
-            if (LocalGameMode.Instance.CurrentState != GameState.Playing) return;
+            if (LocalGameMode.Instance == null || LocalGameMode.Instance.CurrentState != GameState.Playing) return;
             if (IsDead) return;
 
-            // 更新攻击冷却
             if (attackCooldown > 0)
             {
                 attackCooldown -= Time.deltaTime;
@@ -89,15 +97,15 @@ namespace CastleWars.Core
 
             switch (currentState)
             {
-                case UnitState.Moving:
+                case LocalUnitState.Moving:
                     MoveForward();
                     SearchForTarget();
                     break;
 
-                case UnitState.Fighting:
+                case LocalUnitState.Fighting:
                     if (currentTarget == null || !IsTargetValid())
                     {
-                        currentState = UnitState.Moving;
+                        currentState = LocalUnitState.Moving;
                         currentTarget = null;
                     }
                     else
@@ -110,7 +118,6 @@ namespace CastleWars.Core
 
         private void MoveForward()
         {
-            // 根据所属玩家决定移动方向
             float direction = OwnerId == 1 ? 1f : -1f;
             Vector3 movement = new Vector3(direction * MoveSpeed * Time.deltaTime, 0, 0);
             transform.position += movement;
@@ -118,7 +125,6 @@ namespace CastleWars.Core
 
         private void SearchForTarget()
         {
-            // 查找范围内的敌方单位
             Collider[] colliders = Physics.OverlapSphere(transform.position, AttackRange * 2f);
 
             float nearestDistance = float.MaxValue;
@@ -126,7 +132,6 @@ namespace CastleWars.Core
 
             foreach (Collider col in colliders)
             {
-                // 检查敌方单位
                 LocalUnit enemyUnit = col.GetComponent<LocalUnit>();
                 if (enemyUnit != null && enemyUnit.OwnerId != OwnerId && !enemyUnit.IsDead)
                 {
@@ -138,7 +143,6 @@ namespace CastleWars.Core
                     }
                 }
 
-                // 检查敌方城堡
                 LocalCastle enemyCastle = col.GetComponent<LocalCastle>();
                 if (enemyCastle != null && enemyCastle.OwnerId != OwnerId && !enemyCastle.IsDestroyed)
                 {
@@ -154,7 +158,7 @@ namespace CastleWars.Core
             if (nearestTarget != null && nearestDistance <= AttackRange)
             {
                 currentTarget = nearestTarget;
-                currentState = UnitState.Fighting;
+                currentState = LocalUnitState.Fighting;
             }
         }
 
@@ -162,11 +166,9 @@ namespace CastleWars.Core
         {
             if (currentTarget == null) return false;
 
-            // 检查距离
             float distance = Vector3.Distance(transform.position, currentTarget.position);
             if (distance > AttackRange) return false;
 
-            // 检查目标是否还活着
             LocalUnit targetUnit = currentTarget.GetComponent<LocalUnit>();
             if (targetUnit != null) return !targetUnit.IsDead;
 
@@ -180,7 +182,6 @@ namespace CastleWars.Core
         {
             if (attackCooldown > 0) return;
 
-            // 攻击敌方单位
             LocalUnit targetUnit = currentTarget.GetComponent<LocalUnit>();
             if (targetUnit != null)
             {
@@ -189,7 +190,6 @@ namespace CastleWars.Core
                 return;
             }
 
-            // 攻击敌方城堡
             LocalCastle targetCastle = currentTarget.GetComponent<LocalCastle>();
             if (targetCastle != null)
             {
@@ -207,7 +207,6 @@ namespace CastleWars.Core
 
             currentHealth = Mathf.Max(0, currentHealth - damage);
 
-            // 播放受击效果
             PlayHitEffect();
 
             if (currentHealth <= 0)
@@ -218,7 +217,7 @@ namespace CastleWars.Core
 
         private void PlayHitEffect()
         {
-            // 简单的受击效果
+            // 受击效果
         }
 
         /// <summary>
@@ -226,26 +225,23 @@ namespace CastleWars.Core
         /// </summary>
         public void Die(int killerId = 0)
         {
-            if (currentState == UnitState.Dead) return;
+            if (currentState == LocalUnitState.Dead) return;
 
-            currentState = UnitState.Dead;
+            currentState = LocalUnitState.Dead;
             Debug.Log($"Unit (Player {OwnerId}) died!");
 
-            // 播放死亡效果
             PlayDeathEffect();
 
-            // 延迟销毁
             Destroy(gameObject, 0.5f);
         }
 
         private void PlayDeathEffect()
         {
-            // 死亡效果 - 可以添加粒子特效等
+            // 死亡效果
         }
 
         private void OnDrawGizmosSelected()
         {
-            // 绘制攻击范围
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, AttackRange);
         }

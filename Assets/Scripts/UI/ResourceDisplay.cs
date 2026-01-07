@@ -7,6 +7,7 @@ namespace CastleWars.UI
 {
     /// <summary>
     /// 资源显示UI - 显示玩家的金币和收入
+    /// 支持本地模式和网络模式
     /// </summary>
     public class ResourceDisplay : MonoBehaviour
     {
@@ -15,31 +16,43 @@ namespace CastleWars.UI
         [SerializeField] private TextMeshProUGUI incomeText;
 
         private PlayerEconomy economy;
+        private LocalPlayer localPlayer;
 
         private void Start()
         {
-            // 查找本地玩家的经济组件
-            FindLocalPlayerEconomy();
+            FindPlayerEconomy();
         }
 
-        private void FindLocalPlayerEconomy()
+        private void FindPlayerEconomy()
         {
+            // 优先使用本地模式
+            if (LocalGameMode.IsLocalMode && LocalGameMode.Instance != null)
+            {
+                localPlayer = LocalGameMode.Instance.GetPlayer(1);
+                if (localPlayer != null)
+                {
+                    localPlayer.OnGoldChanged += UpdateGoldDisplay;
+                    localPlayer.OnIncomeChanged += UpdateIncomeDisplay;
+
+                    UpdateGoldDisplay(localPlayer.Gold);
+                    UpdateIncomeDisplay(localPlayer.Income);
+                    return;
+                }
+            }
+
+            // 网络模式
             var networkPlayers = FindObjectsOfType<NetworkPlayer>();
             foreach (var player in networkPlayers)
             {
-                if (player.IsOwner)
+                // 在本地模式下，使用第一个玩家
+                economy = player.GetComponent<PlayerEconomy>();
+                if (economy != null)
                 {
-                    economy = player.GetComponent<PlayerEconomy>();
-                    if (economy != null)
-                    {
-                        // 订阅事件
-                        economy.OnGoldChanged += UpdateGoldDisplay;
-                        economy.OnIncomeChanged += UpdateIncomeDisplay;
+                    economy.OnGoldChanged += UpdateGoldDisplay;
+                    economy.OnIncomeChanged += UpdateIncomeDisplay;
 
-                        // 初始显示
-                        UpdateGoldDisplay(economy.Gold);
-                        UpdateIncomeDisplay(economy.Income);
-                    }
+                    UpdateGoldDisplay(economy.Gold);
+                    UpdateIncomeDisplay(economy.Income);
                     break;
                 }
             }
@@ -67,6 +80,12 @@ namespace CastleWars.UI
             {
                 economy.OnGoldChanged -= UpdateGoldDisplay;
                 economy.OnIncomeChanged -= UpdateIncomeDisplay;
+            }
+
+            if (localPlayer != null)
+            {
+                localPlayer.OnGoldChanged -= UpdateGoldDisplay;
+                localPlayer.OnIncomeChanged -= UpdateIncomeDisplay;
             }
         }
     }
