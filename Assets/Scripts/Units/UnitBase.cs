@@ -1,23 +1,44 @@
 using UnityEngine;
-using Unity.Netcode;
 using CastleWars.Data;
+using CastleWars.Core;
+
+#if UNITY_NETCODE
+using Unity.Netcode;
+#endif
 
 namespace CastleWars.Units
 {
     /// <summary>
     /// 单位基类 - 所有游戏单位的核心组件
+    /// 支持本地模式和网络模式
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
+#if UNITY_NETCODE
     public class UnitBase : NetworkBehaviour
+#else
+    public class UnitBase : MonoBehaviour
+#endif
     {
         [Header("单位配置")]
         public UnitData unitData;
 
         [Header("所属玩家")]
+#if UNITY_NETCODE
         public NetworkVariable<int> ownerId = new NetworkVariable<int>();
+#else
+        private int _ownerId;
+        public int OwnerIdValue
+        {
+            get => _ownerId;
+            set => _ownerId = value;
+        }
+#endif
 
         [Header("当前状态")]
-        private NetworkVariable<float> currentHealth = new NetworkVariable<float>();
+#if UNITY_NETCODE
+        private NetworkVariable<float> networkHealth = new NetworkVariable<float>();
+#endif
+        private float localHealth;
         private UnitState currentState = UnitState.Moving;
 
         // 组件引用
@@ -28,9 +49,16 @@ namespace CastleWars.Units
         // 目标
         private Transform currentTarget;
 
-        public float CurrentHealth => currentHealth.Value;
-        public float MaxHealth => unitData.maxHealth;
-        public bool IsDead => currentHealth.Value <= 0;
+        // 本地模式判断
+        private bool IsLocalMode => LocalGameMode.IsLocalMode;
+
+#if UNITY_NETCODE
+        public float CurrentHealth => IsLocalMode ? localHealth : networkHealth.Value;
+#else
+        public float CurrentHealth => localHealth;
+#endif
+        public float MaxHealth => unitData != null ? unitData.maxHealth : 100f;
+        public bool IsDead => CurrentHealth <= 0;
 
         private void Awake()
         {
@@ -39,24 +67,49 @@ namespace CastleWars.Units
             combat = GetComponent<UnitCombat>();
         }
 
+#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
-            if (IsServer)
+            if (IsServer && unitData != null)
             {
-                currentHealth.Value = unitData.maxHealth;
+                networkHealth.Value = unitData.maxHealth;
+            }
+        }
+#endif
+
+        private void Start()
+        {
+            // 本地模式初始化
+            if (IsLocalMode && unitData != null)
+            {
+                localHealth = unitData.maxHealth;
             }
         }
 
         private void Update()
         {
-            if (!IsOwner && !IsServer) return;
+            if (IsLocalMode)
+            {
+                UpdateLocalMode();
+            }
+#if UNITY_NETCODE
+            else
+            {
+                UpdateNetworkMode();
+            }
+#endif
+        }
+
+        private void UpdateLocalMode()
+        {
+            if (IsDead) return;
 
             switch (currentState)
             {
                 case UnitState.Moving:
-                    MoveForward();
+                    MoveForwardLocal();
                     SearchForTarget();
                     break;
 
@@ -72,26 +125,80 @@ namespace CastleWars.Units
                     break;
 
                 case UnitState.Dead:
-                    // 等待销毁
                     break;
             }
         }
 
-        private void MoveForward()
+#if UNITY_NETCODE
+        private void UpdateNetworkMode()
         {
+            if (!IsOwner && !IsServer) return;
+
+            switch (currentState)
+            {
+                case UnitState.Moving:
+                    MoveForwardNetwork();
+                    SearchForTarget();
+                    break;
+
+                case UnitState.Fighting:
+                    if (currentTarget == null || !IsTargetInRange())
+                    {
+                        currentState = UnitState.Moving;
+                    }
+                    else
+                    {
+                        AttackTarget();
+                    }
+                    break;
+
+                case UnitState.Dead:
+                    break;
+            }
+        }
+#endif
+
+        private void MoveForwardLocal()
+        {
+            if (unitData == null) return;
+
+#if UNITY_NETCODE
+            float direction = ownerId.Value == 1 ? 1f : -1f;
+#else
+            float direction = _ownerId == 1 ? 1f : -1f;
+#endif
+
             if (movement != null)
             {
-                // 根据所属玩家决定移动方向
+                movement.MoveInDirection(direction);
+            }
+            else
+            {
+                // 简单移动
+                transform.position += new Vector3(direction * unitData.moveSpeed * Time.deltaTime, 0, 0);
+            }
+        }
+
+#if UNITY_NETCODE
+        private void MoveForwardNetwork()
+        {
+            if (movement != null && unitData != null)
+            {
                 float direction = ownerId.Value == 1 ? 1f : -1f;
                 movement.MoveInDirection(direction);
             }
         }
+#endif
 
         private void SearchForTarget()
         {
             if (combat != null)
             {
+#if UNITY_NETCODE
                 currentTarget = combat.FindNearestEnemy(ownerId.Value);
+#else
+                currentTarget = combat.FindNearestEnemy(_ownerId);
+#endif
                 if (currentTarget != null && IsTargetInRange())
                 {
                     currentState = UnitState.Fighting;
@@ -102,7 +209,7 @@ namespace CastleWars.Units
 
         private bool IsTargetInRange()
         {
-            if (currentTarget == null) return false;
+            if (currentTarget == null || unitData == null) return false;
             float distance = Vector3.Distance(transform.position, currentTarget.position);
             return distance <= unitData.attackRange;
         }
@@ -116,6 +223,33 @@ namespace CastleWars.Units
         }
 
         /// <summary>
+        /// 受到伤害（本地模式直接调用）
+        /// </summary>
+        public void TakeDamage(float damage, int attackerId = 0)
+        {
+            if (IsDead) return;
+
+            if (IsLocalMode)
+            {
+                float actualDamage = CalculateDamage(damage);
+                localHealth = Mathf.Max(0, localHealth - actualDamage);
+                PlayHitEffect();
+
+                if (localHealth <= 0)
+                {
+                    Die(attackerId);
+                }
+            }
+#if UNITY_NETCODE
+            else
+            {
+                TakeDamageServerRpc(damage, attackerId);
+            }
+#endif
+        }
+
+#if UNITY_NETCODE
+        /// <summary>
         /// 受到伤害（服务器权威）
         /// </summary>
         [ServerRpc(RequireOwnership = false)]
@@ -123,27 +257,36 @@ namespace CastleWars.Units
         {
             if (IsDead) return;
 
-            // 计算实际伤害（可以加入护甲减伤等）
             float actualDamage = CalculateDamage(damage);
-            currentHealth.Value = Mathf.Max(0, currentHealth.Value - actualDamage);
+            networkHealth.Value = Mathf.Max(0, networkHealth.Value - actualDamage);
 
-            // 通知所有客户端播放受击效果
             PlayHitEffectClientRpc();
 
-            if (currentHealth.Value <= 0)
+            if (networkHealth.Value <= 0)
             {
                 Die(attackerId);
             }
         }
 
-        private float CalculateDamage(float baseDamage)
+        [ClientRpc]
+        private void PlayHitEffectClientRpc()
         {
-            // 这里可以添加护甲减伤、克制关系等计算
-            return baseDamage;
+            PlayHitEffect();
         }
 
         [ClientRpc]
-        private void PlayHitEffectClientRpc()
+        private void OnUnitDiedClientRpc(int killerId)
+        {
+            // 播放死亡动画和音效
+        }
+#endif
+
+        private float CalculateDamage(float baseDamage)
+        {
+            return baseDamage;
+        }
+
+        private void PlayHitEffect()
         {
             // 播放受击特效、音效
         }
@@ -152,26 +295,20 @@ namespace CastleWars.Units
         {
             currentState = UnitState.Dead;
 
-            // 通知游戏管理器
-            OnUnitDiedClientRpc(killerId);
+#if UNITY_NETCODE
+            if (!IsLocalMode)
+            {
+                OnUnitDiedClientRpc(killerId);
+            }
+#endif
 
-            // 延迟销毁
-            Destroy(gameObject, 2f);
-        }
-
-        [ClientRpc]
-        private void OnUnitDiedClientRpc(int killerId)
-        {
-            // 播放死亡动画
-            // 播放死亡音效
-            // 更新击杀统计
+            Destroy(gameObject, 0.5f);
         }
 
         private void OnDrawGizmosSelected()
         {
             if (unitData != null)
             {
-                // 绘制攻击范围
                 Gizmos.color = Color.red;
                 Gizmos.DrawWireSphere(transform.position, unitData.attackRange);
             }
@@ -180,8 +317,8 @@ namespace CastleWars.Units
 
     public enum UnitState
     {
-        Moving,     // 移动中
-        Fighting,   // 战斗中
-        Dead        // 已死亡
+        Moving,
+        Fighting,
+        Dead
     }
 }

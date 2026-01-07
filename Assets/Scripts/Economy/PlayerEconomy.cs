@@ -1,25 +1,40 @@
 using UnityEngine;
-using Unity.Netcode;
+using CastleWars.Core;
 using System;
+
+#if UNITY_NETCODE
+using Unity.Netcode;
+#endif
 
 namespace CastleWars.Economy
 {
     /// <summary>
     /// 玩家经济系统 - 管理金币和收入
+    /// 支持本地模式和网络模式
     /// </summary>
+#if UNITY_NETCODE
     public class PlayerEconomy : NetworkBehaviour
+#else
+    public class PlayerEconomy : MonoBehaviour
+#endif
     {
         [Header("初始资源")]
         [SerializeField] private int startingGold = 500;
 
         [Header("收入设置")]
-        [SerializeField] private int baseIncome = 10; // 基础收入
-        [SerializeField] private float incomeInterval = 1f; // 收入间隔（秒）
-        [SerializeField] private int incomeIncrement = 1; // 每次收入增长量
+        [SerializeField] private int baseIncome = 10;
+        [SerializeField] private float incomeInterval = 1f;
+        [SerializeField] private int incomeIncrement = 1;
 
-        // 当前资源
-        private NetworkVariable<int> currentGold = new NetworkVariable<int>();
-        private NetworkVariable<int> currentIncome = new NetworkVariable<int>();
+        // 网络模式资源
+#if UNITY_NETCODE
+        private NetworkVariable<int> networkGold = new NetworkVariable<int>();
+        private NetworkVariable<int> networkIncome = new NetworkVariable<int>();
+#endif
+
+        // 本地模式资源
+        private int localGold;
+        private int localIncome;
 
         // 收入计时器
         private float incomeTimer = 0f;
@@ -28,55 +43,116 @@ namespace CastleWars.Economy
         public event Action<int> OnGoldChanged;
         public event Action<int> OnIncomeChanged;
 
-        public int Gold => currentGold.Value;
-        public int Income => currentIncome.Value;
+        // 本地模式判断
+        private bool IsLocalMode => LocalGameMode.IsLocalMode;
 
+#if UNITY_NETCODE
+        public int Gold => IsLocalMode ? localGold : networkGold.Value;
+        public int Income => IsLocalMode ? localIncome : networkIncome.Value;
+#else
+        public int Gold => localGold;
+        public int Income => localIncome;
+#endif
+
+#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
             if (IsServer)
             {
-                currentGold.Value = startingGold;
-                currentIncome.Value = baseIncome;
+                networkGold.Value = startingGold;
+                networkIncome.Value = baseIncome;
             }
 
-            // 客户端监听资源变化
-            currentGold.OnValueChanged += OnGoldValueChanged;
-            currentIncome.OnValueChanged += OnIncomeValueChanged;
+            networkGold.OnValueChanged += OnNetworkGoldChanged;
+            networkIncome.OnValueChanged += OnNetworkIncomeChanged;
         }
 
         public override void OnNetworkDespawn()
         {
             base.OnNetworkDespawn();
 
-            currentGold.OnValueChanged -= OnGoldValueChanged;
-            currentIncome.OnValueChanged -= OnIncomeValueChanged;
+            networkGold.OnValueChanged -= OnNetworkGoldChanged;
+            networkIncome.OnValueChanged -= OnNetworkIncomeChanged;
+        }
+
+        private void OnNetworkGoldChanged(int oldValue, int newValue)
+        {
+            OnGoldChanged?.Invoke(newValue);
+        }
+
+        private void OnNetworkIncomeChanged(int oldValue, int newValue)
+        {
+            OnIncomeChanged?.Invoke(newValue);
+        }
+#endif
+
+        private void Start()
+        {
+            // 本地模式初始化
+            if (IsLocalMode)
+            {
+                localGold = startingGold;
+                localIncome = baseIncome;
+                OnGoldChanged?.Invoke(localGold);
+                OnIncomeChanged?.Invoke(localIncome);
+            }
         }
 
         private void Update()
         {
-            // 只在服务器上执行收入逻辑
+            if (IsLocalMode)
+            {
+                UpdateLocalMode();
+            }
+#if UNITY_NETCODE
+            else
+            {
+                UpdateNetworkMode();
+            }
+#endif
+        }
+
+        private void UpdateLocalMode()
+        {
+            incomeTimer += Time.deltaTime;
+
+            if (incomeTimer >= incomeInterval)
+            {
+                GenerateIncomeLocal();
+                incomeTimer = 0f;
+            }
+        }
+
+#if UNITY_NETCODE
+        private void UpdateNetworkMode()
+        {
             if (!IsServer) return;
 
             incomeTimer += Time.deltaTime;
 
             if (incomeTimer >= incomeInterval)
             {
-                GenerateIncome();
+                GenerateIncomeNetwork();
                 incomeTimer = 0f;
             }
         }
 
-        /// <summary>
-        /// 生成收入
-        /// </summary>
-        private void GenerateIncome()
+        private void GenerateIncomeNetwork()
         {
-            AddGold(currentIncome.Value);
+            networkGold.Value += networkIncome.Value;
+            networkIncome.Value += incomeIncrement;
+        }
+#endif
 
-            // 收入逐渐增长
-            currentIncome.Value += incomeIncrement;
+        private void GenerateIncomeLocal()
+        {
+            localGold += localIncome;
+            OnGoldChanged?.Invoke(localGold);
+
+            localIncome += incomeIncrement;
+            OnIncomeChanged?.Invoke(localIncome);
         }
 
         /// <summary>
@@ -84,8 +160,17 @@ namespace CastleWars.Economy
         /// </summary>
         public void AddGold(int amount)
         {
-            if (!IsServer) return;
-            currentGold.Value += amount;
+            if (IsLocalMode)
+            {
+                localGold += amount;
+                OnGoldChanged?.Invoke(localGold);
+            }
+#if UNITY_NETCODE
+            else if (IsServer)
+            {
+                networkGold.Value += amount;
+            }
+#endif
         }
 
         /// <summary>
@@ -93,14 +178,26 @@ namespace CastleWars.Economy
         /// </summary>
         public bool SpendGold(int amount)
         {
-            if (!IsServer) return false;
-
-            if (currentGold.Value >= amount)
+            if (IsLocalMode)
             {
-                currentGold.Value -= amount;
-                return true;
+                if (localGold >= amount)
+                {
+                    localGold -= amount;
+                    OnGoldChanged?.Invoke(localGold);
+                    return true;
+                }
+                return false;
             }
-
+#if UNITY_NETCODE
+            else if (IsServer)
+            {
+                if (networkGold.Value >= amount)
+                {
+                    networkGold.Value -= amount;
+                    return true;
+                }
+            }
+#endif
             return false;
         }
 
@@ -109,26 +206,29 @@ namespace CastleWars.Economy
         /// </summary>
         public bool HasEnoughGold(int amount)
         {
-            return currentGold.Value >= amount;
+#if UNITY_NETCODE
+            return IsLocalMode ? localGold >= amount : networkGold.Value >= amount;
+#else
+            return localGold >= amount;
+#endif
         }
 
         /// <summary>
-        /// 增加收入（购买建筑时可能增加收入）
+        /// 增加收入
         /// </summary>
         public void AddIncome(int amount)
         {
-            if (!IsServer) return;
-            currentIncome.Value += amount;
-        }
-
-        private void OnGoldValueChanged(int oldValue, int newValue)
-        {
-            OnGoldChanged?.Invoke(newValue);
-        }
-
-        private void OnIncomeValueChanged(int oldValue, int newValue)
-        {
-            OnIncomeChanged?.Invoke(newValue);
+            if (IsLocalMode)
+            {
+                localIncome += amount;
+                OnIncomeChanged?.Invoke(localIncome);
+            }
+#if UNITY_NETCODE
+            else if (IsServer)
+            {
+                networkIncome.Value += amount;
+            }
+#endif
         }
     }
 }
