@@ -1,6 +1,9 @@
 using UnityEngine;
-using Unity.Netcode;
 using System.Collections.Generic;
+
+#if UNITY_NETCODE
+using Unity.Netcode;
+#endif
 
 namespace CastleWars.Core
 {
@@ -8,22 +11,28 @@ namespace CastleWars.Core
     /// 游戏管理器 - 管理游戏状态和流程
     /// 支持网络模式和本地模式
     /// </summary>
+#if UNITY_NETCODE
     public class GameManager : NetworkBehaviour
+#else
+    public class GameManager : MonoBehaviour
+#endif
     {
         public static GameManager Instance { get; private set; }
 
         [Header("游戏设置")]
-        [SerializeField] private float gameDuration = 600f; // 10分钟
-        [SerializeField] private bool forceLocalMode = true; // 强制使用本地模式
+        [SerializeField] private float gameDuration = 600f;
+        [SerializeField] private bool forceLocalMode = true;
 
         [Header("玩家设置")]
         [SerializeField] private Transform player1SpawnPoint;
         [SerializeField] private Transform player2SpawnPoint;
         [SerializeField] private GameObject playerPrefab;
 
+#if UNITY_NETCODE
         // 网络模式的游戏状态
         private NetworkVariable<GameState> networkState = new NetworkVariable<GameState>(GameState.Waiting);
         private NetworkVariable<float> networkGameTime = new NetworkVariable<float>(0f);
+#endif
 
         // 本地模式的游戏状态
         private GameState localState = GameState.Waiting;
@@ -35,8 +44,13 @@ namespace CastleWars.Core
         // 判断是否为本地模式
         public bool IsLocalMode => forceLocalMode || LocalGameMode.IsLocalMode || !IsNetworkActive();
 
+#if UNITY_NETCODE
         public GameState CurrentState => IsLocalMode ? localState : networkState.Value;
         public float GameTime => IsLocalMode ? localGameTime : networkGameTime.Value;
+#else
+        public GameState CurrentState => localState;
+        public float GameTime => localGameTime;
+#endif
 
         private void Awake()
         {
@@ -51,7 +65,6 @@ namespace CastleWars.Core
 
         private void Start()
         {
-            // 如果是本地模式，自动开始游戏
             if (IsLocalMode)
             {
                 InitializeLocalMode();
@@ -63,7 +76,11 @@ namespace CastleWars.Core
         /// </summary>
         private bool IsNetworkActive()
         {
+#if UNITY_NETCODE
             return NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
+#else
+            return false;
+#endif
         }
 
         /// <summary>
@@ -74,7 +91,6 @@ namespace CastleWars.Core
             Debug.Log("Initializing local game mode...");
             LocalGameMode.EnableLocalMode();
 
-            // 检查是否已有LocalGameMode实例
             if (LocalGameMode.Instance == null)
             {
                 GameObject localModeObj = new GameObject("LocalGameMode");
@@ -82,11 +98,11 @@ namespace CastleWars.Core
             }
         }
 
+#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
-            // 网络模式下禁用本地模式
             if (IsNetworkActive())
             {
                 LocalGameMode.DisableLocalMode();
@@ -114,30 +130,10 @@ namespace CastleWars.Core
             networkState.OnValueChanged -= OnGameStateChanged;
         }
 
-        private void Update()
-        {
-            // 本地模式由LocalGameMode处理
-            if (IsLocalMode) return;
-
-            if (!IsServer) return;
-
-            if (networkState.Value == GameState.Playing)
-            {
-                networkGameTime.Value += Time.deltaTime;
-
-                // 检查时间限制
-                if (networkGameTime.Value >= gameDuration)
-                {
-                    EndGame(GameEndReason.TimeLimit);
-                }
-            }
-        }
-
         private void OnClientConnected(ulong clientId)
         {
             Debug.Log($"Client connected: {clientId}");
 
-            // 当有两个玩家时开始游戏
             if (NetworkManager.Singleton.ConnectedClients.Count == 2 && networkState.Value == GameState.Waiting)
             {
                 StartGame();
@@ -150,14 +146,10 @@ namespace CastleWars.Core
 
             if (networkState.Value == GameState.Playing)
             {
-                // 玩家断线，结束游戏
                 EndGame(GameEndReason.PlayerDisconnected);
             }
         }
 
-        /// <summary>
-        /// 开始游戏
-        /// </summary>
         [ServerRpc(RequireOwnership = false)]
         public void StartGameServerRpc()
         {
@@ -171,10 +163,7 @@ namespace CastleWars.Core
             networkState.Value = GameState.Playing;
             networkGameTime.Value = 0f;
 
-            // 生成玩家
             SpawnPlayers();
-
-            // 通知所有客户端
             OnGameStartedClientRpc();
         }
 
@@ -208,7 +197,37 @@ namespace CastleWars.Core
         private void OnGameStartedClientRpc()
         {
             Debug.Log("Game Started!");
-            // 显示游戏开始UI
+        }
+
+        [ClientRpc]
+        private void OnGameEndedClientRpc(GameEndReason reason, int winnerId)
+        {
+            Debug.Log($"Game Ended! Winner: Player {winnerId}, Reason: {reason}");
+        }
+
+        private void OnGameStateChanged(GameState oldState, GameState newState)
+        {
+            Debug.Log($"Game state changed: {oldState} -> {newState}");
+        }
+#endif
+
+        private void Update()
+        {
+            if (IsLocalMode) return;
+
+#if UNITY_NETCODE
+            if (!IsServer) return;
+
+            if (networkState.Value == GameState.Playing)
+            {
+                networkGameTime.Value += Time.deltaTime;
+
+                if (networkGameTime.Value >= gameDuration)
+                {
+                    EndGame(GameEndReason.TimeLimit);
+                }
+            }
+#endif
         }
 
         /// <summary>
@@ -216,7 +235,6 @@ namespace CastleWars.Core
         /// </summary>
         public void EndGame(GameEndReason reason, int winnerId = 0)
         {
-            // 本地模式由LocalGameMode处理
             if (IsLocalMode)
             {
                 if (LocalGameMode.Instance != null)
@@ -226,41 +244,23 @@ namespace CastleWars.Core
                 return;
             }
 
+#if UNITY_NETCODE
             if (!IsServer) return;
 
             networkState.Value = GameState.Ended;
 
-            // 确定胜利者
-            if (reason == GameEndReason.CastleDestroyed)
+            if (reason == GameEndReason.TimeLimit)
             {
-                // winnerId已传入
-            }
-            else if (reason == GameEndReason.TimeLimit)
-            {
-                // 根据剩余城堡血量判断
                 winnerId = DetermineWinnerByHealth();
             }
 
             OnGameEndedClientRpc(reason, winnerId);
+#endif
         }
 
         private int DetermineWinnerByHealth()
         {
-            // 比较双方城堡血量
-            // TODO: 实现城堡系统后完善
             return 1;
-        }
-
-        [ClientRpc]
-        private void OnGameEndedClientRpc(GameEndReason reason, int winnerId)
-        {
-            Debug.Log($"Game Ended! Winner: Player {winnerId}, Reason: {reason}");
-            // 显示游戏结束UI
-        }
-
-        private void OnGameStateChanged(GameState oldState, GameState newState)
-        {
-            Debug.Log($"Game state changed: {oldState} -> {newState}");
         }
 
         /// <summary>
@@ -268,7 +268,6 @@ namespace CastleWars.Core
         /// </summary>
         public void OnCastleDestroyed(int ownerId)
         {
-            // 本地模式由LocalGameMode处理
             if (IsLocalMode)
             {
                 if (LocalGameMode.Instance != null)
@@ -278,27 +277,28 @@ namespace CastleWars.Core
                 return;
             }
 
+#if UNITY_NETCODE
             if (!IsServer) return;
 
-            // 对方获胜
             int winnerId = ownerId == 1 ? 2 : 1;
             EndGame(GameEndReason.CastleDestroyed, winnerId);
+#endif
         }
     }
 
     public enum GameState
     {
-        Waiting,    // 等待玩家
-        Playing,    // 游戏中
-        Paused,     // 暂停
-        Ended       // 已结束
+        Waiting,
+        Playing,
+        Paused,
+        Ended
     }
 
     public enum GameEndReason
     {
-        CastleDestroyed,    // 城堡被摧毁
-        TimeLimit,          // 时间到
-        PlayerDisconnected, // 玩家断线
-        Surrender           // 投降
+        CastleDestroyed,
+        TimeLimit,
+        PlayerDisconnected,
+        Surrender
     }
 }

@@ -1,20 +1,38 @@
 using UnityEngine;
-using Unity.Netcode;
 using CastleWars.Data;
 using CastleWars.Units;
+using CastleWars.Core;
+
+#if UNITY_NETCODE
+using Unity.Netcode;
+#endif
 
 namespace CastleWars.Buildings
 {
     /// <summary>
     /// 建筑基类 - 负责生产单位
+    /// 支持本地模式和网络模式
     /// </summary>
+#if UNITY_NETCODE
     public class BuildingBase : NetworkBehaviour
+#else
+    public class BuildingBase : MonoBehaviour
+#endif
     {
         [Header("建筑配置")]
         public BuildingData buildingData;
 
         [Header("所属玩家")]
+#if UNITY_NETCODE
         public NetworkVariable<int> ownerId = new NetworkVariable<int>();
+#else
+        private int _ownerId;
+        public int OwnerIdValue
+        {
+            get => _ownerId;
+            set => _ownerId = value;
+        }
+#endif
 
         [Header("生产设置")]
         public Transform spawnPoint; // 单位生成位置
@@ -26,47 +44,142 @@ namespace CastleWars.Buildings
         // 对象池
         private UnitPool unitPool;
 
+        // 本地模式判断
+        private bool IsLocalMode => LocalGameMode.IsLocalMode;
+
+#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
             if (IsServer)
             {
-                // 初始化对象池
-                if (buildingData.producedUnit != null)
-                {
-                    unitPool = new UnitPool(buildingData.producedUnit.prefab, 5);
-                }
+                InitializePool();
+            }
+        }
+#endif
+
+        private void Start()
+        {
+            // 本地模式初始化
+            if (IsLocalMode)
+            {
+                InitializePool();
+            }
+        }
+
+        private void InitializePool()
+        {
+            if (buildingData != null && buildingData.producedUnit != null && buildingData.producedUnit.prefab != null)
+            {
+                unitPool = new UnitPool(buildingData.producedUnit.prefab, 5);
             }
         }
 
         private void Update()
         {
-            // 只在服务器上执行生产逻辑
-            if (!IsServer) return;
+            if (IsLocalMode)
+            {
+                UpdateLocalMode();
+            }
+#if UNITY_NETCODE
+            else
+            {
+                UpdateNetworkMode();
+            }
+#endif
+        }
 
-            if (isProducing && buildingData.producedUnit != null)
+        private void UpdateLocalMode()
+        {
+            if (isProducing && buildingData != null && buildingData.producedUnit != null)
             {
                 productionTimer += Time.deltaTime;
 
                 if (productionTimer >= buildingData.productionInterval)
                 {
-                    ProduceUnit();
+                    ProduceUnitLocal();
                     productionTimer = 0f;
                 }
             }
         }
 
-        /// <summary>
-        /// 生产单位
-        /// </summary>
-        private void ProduceUnit()
+#if UNITY_NETCODE
+        private void UpdateNetworkMode()
         {
-            if (buildingData.producedUnit == null) return;
+            // 只在服务器上执行生产逻辑
+            if (!IsServer) return;
+
+            if (isProducing && buildingData != null && buildingData.producedUnit != null)
+            {
+                productionTimer += Time.deltaTime;
+
+                if (productionTimer >= buildingData.productionInterval)
+                {
+                    ProduceUnitNetwork();
+                    productionTimer = 0f;
+                }
+            }
+        }
+#endif
+
+        /// <summary>
+        /// 本地模式生产单位
+        /// </summary>
+        private void ProduceUnitLocal()
+        {
+            if (buildingData == null || buildingData.producedUnit == null) return;
+
+            Vector3 spawnPos = spawnPoint != null ? spawnPoint.position : transform.position + Vector3.forward;
+
+            // 使用LocalUnitSpawner生成单位
+            if (LocalUnitSpawner.Instance != null)
+            {
+#if UNITY_NETCODE
+                LocalUnitSpawner.Instance.SpawnUnit(ownerId.Value, buildingData.producedUnit);
+#else
+                LocalUnitSpawner.Instance.SpawnUnit(_ownerId, buildingData.producedUnit);
+#endif
+            }
+            else
+            {
+                // 备用方案：直接从对象池获取
+                if (unitPool != null)
+                {
+                    GameObject unitObj = unitPool.Get();
+                    unitObj.transform.position = spawnPos;
+
+                    LocalUnit localUnit = unitObj.GetComponent<LocalUnit>();
+                    if (localUnit == null)
+                    {
+                        localUnit = unitObj.AddComponent<LocalUnit>();
+                    }
+#if UNITY_NETCODE
+                    localUnit.Initialize(ownerId.Value, buildingData.producedUnit);
+#else
+                    localUnit.Initialize(_ownerId, buildingData.producedUnit);
+#endif
+                }
+            }
+
+            // 播放生产特效
+            PlayProductionEffect();
+            PlayProductionSound();
+        }
+
+#if UNITY_NETCODE
+        /// <summary>
+        /// 网络模式生产单位
+        /// </summary>
+        private void ProduceUnitNetwork()
+        {
+            if (buildingData == null || buildingData.producedUnit == null) return;
 
             Vector3 spawnPos = spawnPoint != null ? spawnPoint.position : transform.position + Vector3.forward;
 
             // 从对象池获取单位
+            if (unitPool == null) return;
+
             GameObject unitObj = unitPool.Get();
             unitObj.transform.position = spawnPos;
 
@@ -92,11 +205,10 @@ namespace CastleWars.Buildings
         [ClientRpc]
         private void OnUnitProducedClientRpc()
         {
-            // 播放生产特效
             PlayProductionEffect();
-            // 播放生产音效
             PlayProductionSound();
         }
+#endif
 
         private void PlayProductionEffect()
         {

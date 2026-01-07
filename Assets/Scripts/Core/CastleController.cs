@@ -1,5 +1,8 @@
 using UnityEngine;
+
+#if UNITY_NETCODE
 using Unity.Netcode;
+#endif
 
 namespace CastleWars.Core
 {
@@ -7,7 +10,11 @@ namespace CastleWars.Core
     /// 城堡控制器 - 游戏的胜利目标
     /// 支持网络模式和本地模式
     /// </summary>
+#if UNITY_NETCODE
     public class CastleController : NetworkBehaviour
+#else
+    public class CastleController : MonoBehaviour
+#endif
     {
         [Header("城堡属性")]
         [SerializeField] private float maxHealth = 5000f;
@@ -15,8 +22,10 @@ namespace CastleWars.Core
         [Header("所属玩家")]
         public int ownerId;
 
+#if UNITY_NETCODE
         // 网络模式血量
         private NetworkVariable<float> networkHealth = new NetworkVariable<float>();
+#endif
 
         // 本地模式血量
         private float localHealth;
@@ -24,10 +33,15 @@ namespace CastleWars.Core
         // 判断是否为本地模式
         private bool IsLocalMode => LocalGameMode.IsLocalMode;
 
+#if UNITY_NETCODE
         public float CurrentHealth => IsLocalMode ? localHealth : networkHealth.Value;
+#else
+        public float CurrentHealth => localHealth;
+#endif
         public float MaxHealth => maxHealth;
         public bool IsDestroyed => CurrentHealth <= 0;
 
+#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
@@ -40,46 +54,10 @@ namespace CastleWars.Core
             networkHealth.OnValueChanged += OnHealthChanged;
         }
 
-        private void Start()
-        {
-            // 本地模式初始化
-            if (IsLocalMode)
-            {
-                localHealth = maxHealth;
-                Debug.Log($"Castle {ownerId} initialized in local mode with {localHealth} HP");
-            }
-        }
-
         public override void OnNetworkDespawn()
         {
             base.OnNetworkDespawn();
             networkHealth.OnValueChanged -= OnHealthChanged;
-        }
-
-        /// <summary>
-        /// 受到伤害（本地模式直接调用）
-        /// </summary>
-        public void TakeDamage(float damage)
-        {
-            if (IsDestroyed) return;
-
-            if (IsLocalMode)
-            {
-                // 本地模式
-                float oldHealth = localHealth;
-                localHealth = Mathf.Max(0, localHealth - damage);
-                OnHealthChanged(oldHealth, localHealth);
-
-                if (localHealth <= 0)
-                {
-                    OnCastleDestroyed();
-                }
-            }
-            else
-            {
-                // 网络模式
-                TakeDamageServerRpc(damage);
-            }
         }
 
         /// <summary>
@@ -98,12 +76,53 @@ namespace CastleWars.Core
             }
         }
 
+        [ClientRpc]
+        private void PlayDestroyEffectClientRpc()
+        {
+            // 播放城堡摧毁动画和音效
+        }
+#endif
+
+        private void Start()
+        {
+            // 本地模式初始化
+            if (IsLocalMode)
+            {
+                localHealth = maxHealth;
+                Debug.Log($"Castle {ownerId} initialized in local mode with {localHealth} HP");
+            }
+        }
+
+        /// <summary>
+        /// 受到伤害（本地模式直接调用）
+        /// </summary>
+        public void TakeDamage(float damage)
+        {
+            if (IsDestroyed) return;
+
+            if (IsLocalMode)
+            {
+                float oldHealth = localHealth;
+                localHealth = Mathf.Max(0, localHealth - damage);
+                OnHealthChanged(oldHealth, localHealth);
+
+                if (localHealth <= 0)
+                {
+                    OnCastleDestroyed();
+                }
+            }
+#if UNITY_NETCODE
+            else
+            {
+                TakeDamageServerRpc(damage);
+            }
+#endif
+        }
+
         private void OnHealthChanged(float oldHealth, float newHealth)
         {
-            // 更新UI显示血量
             Debug.Log($"Castle {ownerId} Health: {newHealth}/{maxHealth}");
 
-            // 播放受击效果
             if (newHealth < oldHealth)
             {
                 PlayHitEffect();
@@ -114,22 +133,17 @@ namespace CastleWars.Core
         {
             Debug.Log($"Castle {ownerId} destroyed!");
 
-            // 通知游戏管理器
             if (GameManager.Instance != null)
             {
                 GameManager.Instance.OnCastleDestroyed(ownerId);
             }
 
-            // 播放摧毁特效
-            PlayDestroyEffectClientRpc();
-        }
-
-        [ClientRpc]
-        private void PlayDestroyEffectClientRpc()
-        {
-            // 播放城堡摧毁动画
-            // 播放摧毁音效
-            // 可以添加爆炸特效
+#if UNITY_NETCODE
+            if (!IsLocalMode)
+            {
+                PlayDestroyEffectClientRpc();
+            }
+#endif
         }
 
         private void PlayHitEffect()
@@ -141,7 +155,6 @@ namespace CastleWars.Core
         {
             if (IsLocalMode)
             {
-                // 本地模式：检测本地单位
                 var localUnit = other.GetComponent<LocalUnit>();
                 if (localUnit != null && localUnit.OwnerId != ownerId)
                 {
@@ -151,19 +164,17 @@ namespace CastleWars.Core
                 }
             }
 
-            // 网络模式：敌方单位到达城堡，对城堡造成伤害
+#if UNITY_NETCODE
             var unit = other.GetComponent<Units.UnitBase>();
             if (unit != null && unit.ownerId.Value != ownerId)
             {
                 if (IsServer)
                 {
-                    // 单位对城堡造成伤害
                     TakeDamageServerRpc(unit.unitData.attackDamage);
-
-                    // 销毁单位
                     Destroy(unit.gameObject);
                 }
             }
+#endif
         }
     }
 }
