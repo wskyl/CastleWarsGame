@@ -1,107 +1,137 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System;
+using System.Collections.Generic;
 using CastleWars.Data;
 using CastleWars.Economy;
 using CastleWars.Core;
-using System.Collections.Generic;
 
 namespace CastleWars.UI
 {
     /// <summary>
-    /// 建筑UI - 显示可建造的建筑列表
-    /// 支持本地模式和网络模式
+    /// 建筑选择UI
+    /// 显示可建造的建筑列表，处理建筑选择
     /// </summary>
     public class BuildingUI : MonoBehaviour
     {
         [Header("UI引用")]
+        [Tooltip("建筑按钮预制体")]
         [SerializeField] private GameObject buildingButtonPrefab;
+
+        [Tooltip("建筑列表容器")]
         [SerializeField] private Transform buildingListContainer;
+
+        [Tooltip("建筑面板")]
         [SerializeField] private GameObject buildingPanel;
 
+        [Tooltip("关闭按钮")]
+        [SerializeField] private Button closeButton;
+
+        [Header("分类标签")]
+        [SerializeField] private Transform categoryTabContainer;
+        [SerializeField] private GameObject categoryTabPrefab;
+
         [Header("建筑数据")]
+        [Tooltip("所有可建造的建筑")]
         [SerializeField] private List<BuildingData> availableBuildings = new List<BuildingData>();
 
-        private BuildingManager buildingManager;
-        private PlayerEconomy economy;
-        private LocalPlayer localPlayer;
-        private List<BuildingButton> buildingButtons = new List<BuildingButton>();
+        // 组件引用
+        private BuildingManager _buildingManager;
+        private PlayerEconomy _economy;
 
-        private int selectedSlot = -1;
+        // 按钮列表
+        private List<BuildingButton> _buildingButtons = new List<BuildingButton>();
+
+        // 当前选中的槽位
+        private int _selectedSlot = -1;
+
+        // 当前选中的分类
+        private BuildingCategory _currentCategory = BuildingCategory.Infantry;
+
+        // 事件
+        public event Action<BuildingData, int> OnBuildingSelected; // 建筑数据, 槽位索引
+        public event Action OnPanelClosed;
+
+        // 属性
+        public bool IsOpen => buildingPanel != null && buildingPanel.activeSelf;
 
         private void Start()
         {
-            // 获取本地玩家的组件
+            // 查找玩家组件
             FindPlayerComponents();
 
             // 创建建筑按钮
             CreateBuildingButtons();
 
-            // 隐藏面板
+            // 创建分类标签
+            CreateCategoryTabs();
+
+            // 设置关闭按钮
+            if (closeButton != null)
+            {
+                closeButton.onClick.AddListener(HideBuildingPanel);
+            }
+
+            // 初始隐藏面板
             if (buildingPanel != null)
             {
                 buildingPanel.SetActive(false);
             }
         }
 
+        /// <summary>
+        /// 查找玩家组件
+        /// </summary>
         private void FindPlayerComponents()
         {
-            // 优先使用本地模式
-            if (LocalGameMode.IsLocalMode && LocalGameMode.Instance != null)
+            // 查找本地玩家
+            NetworkPlayer[] players = FindObjectsOfType<NetworkPlayer>();
+            foreach (var player in players)
             {
-                localPlayer = LocalGameMode.Instance.GetPlayer(1);
-                return;
-            }
-
-            // 网络模式
-            var playerObj = FindLocalPlayer();
-            if (playerObj != null)
-            {
-                buildingManager = playerObj.GetComponent<BuildingManager>();
-                economy = playerObj.GetComponent<PlayerEconomy>();
-            }
-        }
-
-        private GameObject FindLocalPlayer()
-        {
-            var networkPlayers = FindObjectsOfType<NetworkPlayer>();
-            foreach (var player in networkPlayers)
-            {
-                // 本地模式下使用第一个玩家
-                return player.gameObject;
-            }
-            return null;
-        }
-
-        private void CreateBuildingButtons()
-        {
-            if (buildingButtonPrefab == null || buildingListContainer == null) return;
-
-            foreach (BuildingData building in availableBuildings)
-            {
-                GameObject buttonObj = Instantiate(buildingButtonPrefab, buildingListContainer);
-                BuildingButton button = buttonObj.GetComponent<BuildingButton>();
-
-                if (button != null)
+                if (player.IsLocalPlayer())
                 {
-                    button.Initialize(building, OnBuildingSelected);
-                    buildingButtons.Add(button);
+                    _buildingManager = player.GetBuildingManager();
+                    _economy = player.GetEconomy();
+                    break;
                 }
             }
         }
 
         /// <summary>
+        /// 设置玩家组件引用
+        /// </summary>
+        public void SetPlayerComponents(BuildingManager manager, PlayerEconomy economy)
+        {
+            _buildingManager = manager;
+            _economy = economy;
+
+            // 订阅事件
+            if (_economy != null)
+            {
+                _economy.OnGoldChanged += OnGoldChanged;
+            }
+        }
+
+        #region 面板控制
+
+        /// <summary>
         /// 显示建筑面板
         /// </summary>
+        /// <param name="slotIndex">槽位索引</param>
         public void ShowBuildingPanel(int slotIndex)
         {
-            selectedSlot = slotIndex;
+            _selectedSlot = slotIndex;
+
             if (buildingPanel != null)
             {
                 buildingPanel.SetActive(true);
             }
 
+            // 更新按钮状态
             UpdateButtonStates();
+
+            Debug.Log($"[BuildingUI] 显示建筑面板 - 槽位: {slotIndex}");
         }
 
         /// <summary>
@@ -113,45 +143,167 @@ namespace CastleWars.UI
             {
                 buildingPanel.SetActive(false);
             }
-            selectedSlot = -1;
+
+            _selectedSlot = -1;
+            OnPanelClosed?.Invoke();
+
+            Debug.Log("[BuildingUI] 隐藏建筑面板");
         }
 
-        private void OnBuildingSelected(BuildingData buildingData)
+        /// <summary>
+        /// 切换面板显示状态
+        /// </summary>
+        public void TogglePanel(int slotIndex)
         {
-            if (selectedSlot < 0) return;
-
-            if (buildingManager != null)
+            if (IsOpen && _selectedSlot == slotIndex)
             {
-                buildingManager.TryBuildBuilding(buildingData, selectedSlot);
+                HideBuildingPanel();
+            }
+            else
+            {
+                ShowBuildingPanel(slotIndex);
+            }
+        }
+
+        #endregion
+
+        #region 建筑按钮
+
+        /// <summary>
+        /// 创建建筑按钮
+        /// </summary>
+        private void CreateBuildingButtons()
+        {
+            if (buildingButtonPrefab == null || buildingListContainer == null) return;
+
+            // 清除现有按钮
+            foreach (Transform child in buildingListContainer)
+            {
+                Destroy(child.gameObject);
+            }
+            _buildingButtons.Clear();
+
+            // 创建新按钮
+            foreach (BuildingData building in availableBuildings)
+            {
+                GameObject buttonObj = Instantiate(buildingButtonPrefab, buildingListContainer);
+                BuildingButton button = buttonObj.GetComponent<BuildingButton>();
+
+                if (button != null)
+                {
+                    button.Initialize(building, OnBuildingButtonClicked);
+                    _buildingButtons.Add(button);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 创建分类标签
+        /// </summary>
+        private void CreateCategoryTabs()
+        {
+            if (categoryTabContainer == null || categoryTabPrefab == null) return;
+
+            foreach (BuildingCategory category in Enum.GetValues(typeof(BuildingCategory)))
+            {
+                GameObject tabObj = Instantiate(categoryTabPrefab, categoryTabContainer);
+                Button tabButton = tabObj.GetComponent<Button>();
+                TextMeshProUGUI tabText = tabObj.GetComponentInChildren<TextMeshProUGUI>();
+
+                if (tabText != null)
+                {
+                    tabText.text = category.ToString();
+                }
+
+                if (tabButton != null)
+                {
+                    BuildingCategory cat = category; // 闭包捕获
+                    tabButton.onClick.AddListener(() => FilterByCategory(cat));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 按分类筛选
+        /// </summary>
+        private void FilterByCategory(BuildingCategory category)
+        {
+            _currentCategory = category;
+
+            foreach (var button in _buildingButtons)
+            {
+                bool show = button.BuildingData.category == category;
+                button.gameObject.SetActive(show);
+            }
+        }
+
+        /// <summary>
+        /// 建筑按钮点击回调
+        /// </summary>
+        private void OnBuildingButtonClicked(BuildingData buildingData)
+        {
+            if (_selectedSlot < 0) return;
+
+            // 尝试建造
+            if (_buildingManager != null)
+            {
+                _buildingManager.TryBuildBuilding(buildingData, _selectedSlot);
             }
 
+            OnBuildingSelected?.Invoke(buildingData, _selectedSlot);
+
+            // 隐藏面板
             HideBuildingPanel();
         }
 
+        /// <summary>
+        /// 更新按钮状态
+        /// </summary>
         private void UpdateButtonStates()
         {
-            int currentGold = 0;
+            int currentGold = _economy != null ? _economy.Gold : 0;
 
-            if (LocalGameMode.IsLocalMode && localPlayer != null)
+            foreach (var button in _buildingButtons)
             {
-                currentGold = localPlayer.Gold;
-            }
-            else if (economy != null)
-            {
-                currentGold = economy.Gold;
-            }
+                // 检查金币
+                bool canAfford = currentGold >= button.BuildingData.goldCost;
 
-            foreach (var button in buildingButtons)
-            {
-                button.UpdateState(currentGold);
+                // 检查前置条件
+                bool hasPrerequisites = true;
+                if (_buildingManager != null)
+                {
+                    var missing = _buildingManager.GetMissingPrerequisites(button.BuildingData);
+                    hasPrerequisites = missing.Count == 0;
+                }
+
+                button.UpdateState(canAfford, hasPrerequisites);
             }
         }
 
-        private void Update()
+        private void OnGoldChanged(int newGold)
         {
-            if (buildingPanel != null && buildingPanel.activeSelf)
+            if (IsOpen)
             {
                 UpdateButtonStates();
+            }
+        }
+
+        #endregion
+
+        private void Update()
+        {
+            // 持续更新按钮状态（如果面板打开）
+            if (IsOpen)
+            {
+                UpdateButtonStates();
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_economy != null)
+            {
+                _economy.OnGoldChanged -= OnGoldChanged;
             }
         }
     }
@@ -162,49 +314,92 @@ namespace CastleWars.UI
     public class BuildingButton : MonoBehaviour
     {
         [Header("UI组件")]
-        public Image iconImage;
-        public TextMeshProUGUI nameText;
-        public TextMeshProUGUI costText;
-        public Button button;
+        [SerializeField] private Image iconImage;
+        [SerializeField] private TextMeshProUGUI nameText;
+        [SerializeField] private TextMeshProUGUI costText;
+        [SerializeField] private TextMeshProUGUI tierText;
+        [SerializeField] private Button button;
+        [SerializeField] private Image lockOverlay;
+        [SerializeField] private GameObject affordIndicator;
 
-        private BuildingData buildingData;
-        private System.Action<BuildingData> onClickCallback;
+        // 建筑数据
+        private BuildingData _buildingData;
+        private Action<BuildingData> _onClickCallback;
 
-        public void Initialize(BuildingData data, System.Action<BuildingData> onClick)
+        // 属性
+        public BuildingData BuildingData => _buildingData;
+
+        /// <summary>
+        /// 初始化按钮
+        /// </summary>
+        public void Initialize(BuildingData data, Action<BuildingData> onClick)
         {
-            buildingData = data;
-            onClickCallback = onClick;
+            _buildingData = data;
+            _onClickCallback = onClick;
 
-            if (iconImage != null && data.icon != null) iconImage.sprite = data.icon;
-            if (nameText != null) nameText.text = data.buildingName;
-            if (costText != null) costText.text = $"{data.goldCost} Gold";
+            // 设置UI
+            if (iconImage != null && data.icon != null)
+            {
+                iconImage.sprite = data.icon;
+            }
 
+            if (nameText != null)
+            {
+                nameText.text = data.buildingName;
+            }
+
+            if (costText != null)
+            {
+                costText.text = $"{data.goldCost}";
+            }
+
+            if (tierText != null)
+            {
+                tierText.text = data.tier.ToString();
+            }
+
+            // 绑定点击事件
             if (button != null)
             {
                 button.onClick.AddListener(OnButtonClicked);
             }
         }
 
-        public void UpdateState(int currentGold)
+        /// <summary>
+        /// 更新按钮状态
+        /// </summary>
+        public void UpdateState(bool canAfford, bool hasPrerequisites)
         {
-            if (buildingData == null) return;
+            bool canBuild = canAfford && hasPrerequisites;
 
-            bool canAfford = currentGold >= buildingData.goldCost;
-
+            // 更新按钮可交互状态
             if (button != null)
             {
-                button.interactable = canAfford;
+                button.interactable = canBuild;
             }
 
+            // 更新金币颜色
             if (costText != null)
             {
                 costText.color = canAfford ? Color.green : Color.red;
+            }
+
+            // 更新锁定遮罩
+            if (lockOverlay != null)
+            {
+                lockOverlay.gameObject.SetActive(!hasPrerequisites);
+            }
+
+            // 更新可负担指示器
+            if (affordIndicator != null)
+            {
+                affordIndicator.SetActive(canAfford);
             }
         }
 
         private void OnButtonClicked()
         {
-            onClickCallback?.Invoke(buildingData);
+            _onClickCallback?.Invoke(_buildingData);
         }
     }
 }

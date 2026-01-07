@@ -1,324 +1,531 @@
 using UnityEngine;
+using System;
+using Unity.Netcode;
 using CastleWars.Data;
 using CastleWars.Core;
-
-#if UNITY_NETCODE
-using Unity.Netcode;
-#endif
 
 namespace CastleWars.Units
 {
     /// <summary>
-    /// 单位基类 - 所有游戏单位的核心组件
-    /// 支持本地模式和网络模式
+    /// 单位状态枚举
+    /// </summary>
+    public enum UnitState
+    {
+        Idle,       // 空闲
+        Moving,     // 移动中
+        Fighting,   // 战斗中
+        Stunned,    // 被击晕
+        Dead        // 死亡
+    }
+
+    /// <summary>
+    /// 单位基类
+    /// 管理单位生命值、状态机、网络同步
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
-#if UNITY_NETCODE
+    [RequireComponent(typeof(Collider))]
     public class UnitBase : NetworkBehaviour
-#else
-    public class UnitBase : MonoBehaviour
-#endif
     {
         [Header("单位配置")]
+        [Tooltip("单位数据配置")]
         public UnitData unitData;
 
-        [Header("所属玩家")]
-#if UNITY_NETCODE
-        public NetworkVariable<int> ownerId = new NetworkVariable<int>();
-#else
-        private int _ownerId;
-        public int OwnerIdValue
-        {
-            get => _ownerId;
-            set => _ownerId = value;
-        }
-#endif
+        // 网络同步变量
+        private NetworkVariable<float> _currentHealth = new NetworkVariable<float>(
+            100f,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
-        [Header("当前状态")]
-#if UNITY_NETCODE
-        private NetworkVariable<float> networkHealth = new NetworkVariable<float>();
-#endif
-        private float localHealth;
-        private UnitState currentState = UnitState.Moving;
+        private NetworkVariable<int> _ownerId = new NetworkVariable<int>(
+            0,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
+
+        private NetworkVariable<UnitState> _currentState = new NetworkVariable<UnitState>(
+            UnitState.Moving,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
         // 组件引用
-        private Rigidbody rb;
-        private UnitMovement movement;
-        private UnitCombat combat;
+        private Rigidbody _rigidbody;
+        private UnitMovement _movement;
+        private UnitCombat _combat;
+        private Animator _animator;
 
-        // 目标
-        private Transform currentTarget;
+        // 当前目标
+        private Transform _currentTarget;
 
-        // 本地模式判断
-        private bool IsLocalMode => LocalGameMode.IsLocalMode;
+        // 击晕计时器
+        private float _stunEndTime;
 
-#if UNITY_NETCODE
-        public float CurrentHealth => IsLocalMode ? localHealth : networkHealth.Value;
-#else
-        public float CurrentHealth => localHealth;
-#endif
+        // 光环加成
+        private float _attackBonus = 0f;
+
+        // 事件
+        public event Action<float, float> OnHealthChanged; // current, max
+        public event Action<UnitState> OnStateChanged;
+        public event Action OnUnitDied;
+
+        // 属性
+        public float CurrentHealth => _currentHealth.Value;
         public float MaxHealth => unitData != null ? unitData.maxHealth : 100f;
-        public bool IsDead => CurrentHealth <= 0;
+        public int OwnerId => _ownerId.Value;
+        public UnitState CurrentState => _currentState.Value;
+        public bool IsDead => _currentState.Value == UnitState.Dead;
+        public bool IsStunned => _currentState.Value == UnitState.Stunned;
+        public float HealthPercentage => _currentHealth.Value / MaxHealth;
+
+        // 获取实际攻击力（含光环加成）
+        public float GetAttackDamage()
+        {
+            if (unitData == null) return 0f;
+            return unitData.attackDamage * (1f + _attackBonus);
+        }
+
+        // 获取对建筑的伤害
+        public float GetBuildingDamage()
+        {
+            if (unitData == null) return 0f;
+            return unitData.attackDamage * unitData.buildingDamageMultiplier * (1f + _attackBonus);
+        }
 
         private void Awake()
         {
-            rb = GetComponent<Rigidbody>();
-            movement = GetComponent<UnitMovement>();
-            combat = GetComponent<UnitCombat>();
+            _rigidbody = GetComponent<Rigidbody>();
+            _movement = GetComponent<UnitMovement>();
+            _combat = GetComponent<UnitCombat>();
+            _animator = GetComponent<Animator>();
         }
 
-#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
+            _currentHealth.OnValueChanged += HandleHealthChanged;
+            _currentState.OnValueChanged += HandleStateChanged;
+
             if (IsServer && unitData != null)
             {
-                networkHealth.Value = unitData.maxHealth;
+                _currentHealth.Value = unitData.maxHealth;
             }
-        }
-#endif
 
-        private void Start()
+            Debug.Log($"[UnitBase] 单位生成 - 所有者: Player {_ownerId.Value}, 血量: {_currentHealth.Value}");
+        }
+
+        public override void OnNetworkDespawn()
         {
-            // 本地模式初始化
-            if (IsLocalMode && unitData != null)
+            base.OnNetworkDespawn();
+
+            _currentHealth.OnValueChanged -= HandleHealthChanged;
+            _currentState.OnValueChanged -= HandleStateChanged;
+        }
+
+        /// <summary>
+        /// 初始化单位
+        /// </summary>
+        public void Initialize(int ownerId, UnitData data = null)
+        {
+            if (!IsServer) return;
+
+            _ownerId.Value = ownerId;
+
+            if (data != null)
             {
-                localHealth = unitData.maxHealth;
+                unitData = data;
             }
+
+            if (unitData != null)
+            {
+                _currentHealth.Value = unitData.maxHealth;
+            }
+
+            _currentState.Value = UnitState.Moving;
         }
 
         private void Update()
         {
-            if (IsLocalMode)
+            if (!IsServer) return;
+
+            // 检查击晕状态
+            if (IsStunned && Time.time >= _stunEndTime)
             {
-                UpdateLocalMode();
+                _currentState.Value = UnitState.Moving;
             }
-#if UNITY_NETCODE
-            else
-            {
-                UpdateNetworkMode();
-            }
-#endif
+
+            // 状态机更新
+            UpdateStateMachine();
+
+            // 更新光环效果
+            UpdateAuraBonus();
         }
 
-        private void UpdateLocalMode()
-        {
-            if (IsDead) return;
+        #region 状态机
 
-            switch (currentState)
+        private void UpdateStateMachine()
+        {
+            if (IsDead || IsStunned) return;
+
+            switch (_currentState.Value)
             {
+                case UnitState.Idle:
+                    HandleIdleState();
+                    break;
+
                 case UnitState.Moving:
-                    MoveForwardLocal();
-                    SearchForTarget();
+                    HandleMovingState();
                     break;
 
                 case UnitState.Fighting:
-                    if (currentTarget == null || !IsTargetInRange())
-                    {
-                        currentState = UnitState.Moving;
-                    }
-                    else
-                    {
-                        AttackTarget();
-                    }
-                    break;
-
-                case UnitState.Dead:
+                    HandleFightingState();
                     break;
             }
         }
 
-#if UNITY_NETCODE
-        private void UpdateNetworkMode()
+        private void HandleIdleState()
         {
-            if (!IsOwner && !IsServer) return;
+            // 搜索敌人
+            SearchForTarget();
 
-            switch (currentState)
+            // 如果没有敌人，继续移动
+            if (_currentTarget == null)
             {
-                case UnitState.Moving:
-                    MoveForwardNetwork();
-                    SearchForTarget();
-                    break;
-
-                case UnitState.Fighting:
-                    if (currentTarget == null || !IsTargetInRange())
-                    {
-                        currentState = UnitState.Moving;
-                    }
-                    else
-                    {
-                        AttackTarget();
-                    }
-                    break;
-
-                case UnitState.Dead:
-                    break;
+                _currentState.Value = UnitState.Moving;
             }
         }
-#endif
 
-        private void MoveForwardLocal()
+        private void HandleMovingState()
         {
-            if (unitData == null) return;
-
-#if UNITY_NETCODE
-            float direction = ownerId.Value == 1 ? 1f : -1f;
-#else
-            float direction = _ownerId == 1 ? 1f : -1f;
-#endif
-
-            if (movement != null)
+            // 移动
+            if (_movement != null)
             {
-                movement.MoveInDirection(direction);
+                float direction = _ownerId.Value == 1 ? 1f : -1f;
+                _movement.MoveInDirection(direction);
             }
-            else
+
+            // 搜索敌人
+            SearchForTarget();
+
+            // 如果找到敌人并在攻击范围内
+            if (_currentTarget != null && IsTargetInRange())
             {
-                // 简单移动
-                transform.position += new Vector3(direction * unitData.moveSpeed * Time.deltaTime, 0, 0);
+                _currentState.Value = UnitState.Fighting;
+                _movement?.Stop();
             }
         }
 
-#if UNITY_NETCODE
-        private void MoveForwardNetwork()
+        private void HandleFightingState()
         {
-            if (movement != null && unitData != null)
+            // 检查目标是否有效
+            if (_currentTarget == null || !IsTargetValid(_currentTarget))
             {
-                float direction = ownerId.Value == 1 ? 1f : -1f;
-                movement.MoveInDirection(direction);
+                _currentTarget = null;
+                _currentState.Value = UnitState.Moving;
+                _movement?.Resume();
+                return;
+            }
+
+            // 检查是否在攻击范围内
+            if (!IsTargetInRange())
+            {
+                _currentState.Value = UnitState.Moving;
+                _movement?.Resume();
+                return;
+            }
+
+            // 攻击
+            if (_combat != null)
+            {
+                _combat.Attack(_currentTarget);
             }
         }
-#endif
 
         private void SearchForTarget()
         {
-            if (combat != null)
-            {
-#if UNITY_NETCODE
-                currentTarget = combat.FindNearestEnemy(ownerId.Value);
-#else
-                currentTarget = combat.FindNearestEnemy(_ownerId);
-#endif
-                if (currentTarget != null && IsTargetInRange())
-                {
-                    currentState = UnitState.Fighting;
-                    movement?.Stop();
-                }
-            }
+            if (_combat == null) return;
+
+            _currentTarget = _combat.FindNearestEnemy(_ownerId.Value);
         }
 
         private bool IsTargetInRange()
         {
-            if (currentTarget == null || unitData == null) return false;
-            float distance = Vector3.Distance(transform.position, currentTarget.position);
+            if (_currentTarget == null || unitData == null) return false;
+
+            float distance = Vector3.Distance(transform.position, _currentTarget.position);
             return distance <= unitData.attackRange;
         }
 
-        private void AttackTarget()
+        private bool IsTargetValid(Transform target)
         {
-            if (combat != null)
+            if (target == null) return false;
+
+            UnitBase targetUnit = target.GetComponent<UnitBase>();
+            if (targetUnit != null)
             {
-                combat.Attack(currentTarget);
+                return !targetUnit.IsDead;
             }
+
+            CastleController targetCastle = target.GetComponent<CastleController>();
+            if (targetCastle != null)
+            {
+                return !targetCastle.IsDestroyed;
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        #region 伤害处理
+
+        /// <summary>
+        /// 受到伤害（ServerRpc）
+        /// </summary>
+        [ServerRpc(RequireOwnership = false)]
+        public void TakeDamageServerRpc(float damage, int attackerId, ServerRpcParams rpcParams = default)
+        {
+            ApplyDamage(damage, attackerId);
         }
 
         /// <summary>
-        /// 受到伤害（本地模式直接调用）
+        /// 直接受到伤害（仅服务器调用）
         /// </summary>
         public void TakeDamage(float damage, int attackerId = 0)
         {
-            if (IsDead) return;
-
-            if (IsLocalMode)
-            {
-                float actualDamage = CalculateDamage(damage);
-                localHealth = Mathf.Max(0, localHealth - actualDamage);
-                PlayHitEffect();
-
-                if (localHealth <= 0)
-                {
-                    Die(attackerId);
-                }
-            }
-#if UNITY_NETCODE
-            else
-            {
-                TakeDamageServerRpc(damage, attackerId);
-            }
-#endif
+            if (!IsServer) return;
+            ApplyDamage(damage, attackerId);
         }
 
-#if UNITY_NETCODE
-        /// <summary>
-        /// 受到伤害（服务器权威）
-        /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void TakeDamageServerRpc(float damage, int attackerId)
+        private void ApplyDamage(float damage, int attackerId)
         {
-            if (IsDead) return;
+            if (IsDead || damage <= 0) return;
 
-            float actualDamage = CalculateDamage(damage);
-            networkHealth.Value = Mathf.Max(0, networkHealth.Value - actualDamage);
+            // 计算实际伤害（考虑护甲）
+            float actualDamage = CalculateActualDamage(damage);
 
+            float newHealth = Mathf.Max(0, _currentHealth.Value - actualDamage);
+            _currentHealth.Value = newHealth;
+
+            Debug.Log($"[UnitBase] {unitData?.unitName ?? "Unit"} 受到 {actualDamage} 伤害, 剩余: {newHealth}");
+
+            // 播放受击特效
             PlayHitEffectClientRpc();
 
-            if (networkHealth.Value <= 0)
+            // 检查是否死亡
+            if (newHealth <= 0)
             {
                 Die(attackerId);
             }
         }
 
+        private float CalculateActualDamage(float baseDamage)
+        {
+            if (unitData == null) return baseDamage;
+
+            // 根据护甲类型减伤
+            float reduction = unitData.armorType switch
+            {
+                ArmorType.None => 0f,
+                ArmorType.Light => 0.1f,
+                ArmorType.Medium => 0.2f,
+                ArmorType.Heavy => 0.3f,
+                ArmorType.Dragon => 0.3f,
+                _ => 0f
+            };
+
+            return baseDamage * (1f - reduction);
+        }
+
+        /// <summary>
+        /// 对单位施加击晕
+        /// </summary>
+        public void ApplyStun(float duration)
+        {
+            if (!IsServer || IsDead) return;
+
+            _currentState.Value = UnitState.Stunned;
+            _stunEndTime = Time.time + duration;
+            _movement?.Stop();
+
+            PlayStunEffectClientRpc();
+        }
+
+        #endregion
+
+        #region 死亡处理
+
+        /// <summary>
+        /// 单位死亡
+        /// </summary>
+        public void Die(int killerId = 0)
+        {
+            if (!IsServer || IsDead) return;
+
+            Debug.Log($"[UnitBase] {unitData?.unitName ?? "Unit"} 死亡, 击杀者: Player {killerId}");
+
+            _currentState.Value = UnitState.Dead;
+            _movement?.Stop();
+
+            // 播放死亡特效
+            PlayDeathEffectClientRpc();
+
+            // 延迟销毁
+            Invoke(nameof(DespawnUnit), 1f);
+        }
+
+        private void DespawnUnit()
+        {
+            if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
+            {
+                NetworkObject.Despawn();
+            }
+        }
+
+        #endregion
+
+        #region 光环系统
+
+        private void UpdateAuraBonus()
+        {
+            if (unitData == null) return;
+
+            _attackBonus = 0f;
+
+            // 搜索周围友军的光环
+            Collider[] nearbyUnits = Physics.OverlapSphere(transform.position, 10f);
+            foreach (var col in nearbyUnits)
+            {
+                UnitBase otherUnit = col.GetComponent<UnitBase>();
+                if (otherUnit != null &&
+                    otherUnit != this &&
+                    otherUnit.OwnerId == _ownerId.Value &&
+                    otherUnit.unitData != null &&
+                    otherUnit.unitData.auraAttackBonus > 0)
+                {
+                    float distance = Vector3.Distance(transform.position, otherUnit.transform.position);
+                    if (distance <= otherUnit.unitData.auraRange)
+                    {
+                        _attackBonus += otherUnit.unitData.auraAttackBonus;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region 网络回调和特效
+
         [ClientRpc]
         private void PlayHitEffectClientRpc()
         {
-            PlayHitEffect();
+            // 播放受击动画
+            if (_animator != null)
+            {
+                _animator.SetTrigger("Hit");
+            }
+
+            OnHealthChanged?.Invoke(_currentHealth.Value, MaxHealth);
         }
 
         [ClientRpc]
-        private void OnUnitDiedClientRpc(int killerId)
+        private void PlayDeathEffectClientRpc()
         {
-            // 播放死亡动画和音效
-        }
-#endif
-
-        private float CalculateDamage(float baseDamage)
-        {
-            return baseDamage;
-        }
-
-        private void PlayHitEffect()
-        {
-            // 播放受击特效、音效
-        }
-
-        private void Die(int killerId)
-        {
-            currentState = UnitState.Dead;
-
-#if UNITY_NETCODE
-            if (!IsLocalMode)
+            // 播放死亡动画
+            if (_animator != null)
             {
-                OnUnitDiedClientRpc(killerId);
+                _animator.SetTrigger("Die");
             }
-#endif
 
-            Destroy(gameObject, 0.5f);
+            OnUnitDied?.Invoke();
         }
+
+        [ClientRpc]
+        private void PlayStunEffectClientRpc()
+        {
+            // 播放击晕特效
+            if (_animator != null)
+            {
+                _animator.SetTrigger("Stun");
+            }
+        }
+
+        private void HandleHealthChanged(float previousValue, float newValue)
+        {
+            OnHealthChanged?.Invoke(newValue, MaxHealth);
+        }
+
+        private void HandleStateChanged(UnitState previousValue, UnitState newValue)
+        {
+            OnStateChanged?.Invoke(newValue);
+        }
+
+        #endregion
+
+        #region 工具方法
+
+        /// <summary>
+        /// 获取单位数据
+        /// </summary>
+        public UnitData GetUnitData()
+        {
+            return unitData;
+        }
+
+        /// <summary>
+        /// 检查是否可以攻击指定目标
+        /// </summary>
+        public bool CanAttack(UnitBase target)
+        {
+            if (target == null || unitData == null || target.unitData == null)
+                return false;
+
+            return unitData.CanAttack(target.unitData.unitType);
+        }
+
+        /// <summary>
+        /// 获取到目标的距离
+        /// </summary>
+        public float GetDistanceTo(Transform target)
+        {
+            if (target == null) return float.MaxValue;
+            return Vector3.Distance(transform.position, target.position);
+        }
+
+        /// <summary>
+        /// 设置当前目标
+        /// </summary>
+        public void SetTarget(Transform target)
+        {
+            _currentTarget = target;
+        }
+
+        /// <summary>
+        /// 获取当前目标
+        /// </summary>
+        public Transform GetCurrentTarget()
+        {
+            return _currentTarget;
+        }
+
+        #endregion
 
         private void OnDrawGizmosSelected()
         {
             if (unitData != null)
             {
+                // 攻击范围
                 Gizmos.color = Color.red;
                 Gizmos.DrawWireSphere(transform.position, unitData.attackRange);
+
+                // 光环范围
+                if (unitData.auraRange > 0)
+                {
+                    Gizmos.color = Color.green;
+                    Gizmos.DrawWireSphere(transform.position, unitData.auraRange);
+                }
             }
         }
-    }
-
-    public enum UnitState
-    {
-        Moving,
-        Fighting,
-        Dead
     }
 }

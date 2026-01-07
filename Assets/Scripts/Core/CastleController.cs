@@ -1,180 +1,254 @@
 using UnityEngine;
-
-#if UNITY_NETCODE
+using System;
 using Unity.Netcode;
-#endif
+using CastleWars.Units;
 
 namespace CastleWars.Core
 {
     /// <summary>
-    /// 城堡控制器 - 游戏的胜利目标
-    /// 支持网络模式和本地模式
+    /// 城堡控制器
+    /// 管理城堡血量、受击判定、摧毁检测
     /// </summary>
-#if UNITY_NETCODE
     public class CastleController : NetworkBehaviour
-#else
-    public class CastleController : MonoBehaviour
-#endif
     {
         [Header("城堡属性")]
         [SerializeField] private float maxHealth = 5000f;
 
-        [Header("所属玩家")]
-        public int ownerId;
+        [Header("特效")]
+        [SerializeField] private GameObject hitEffectPrefab;
+        [SerializeField] private GameObject destroyEffectPrefab;
 
-#if UNITY_NETCODE
-        // 网络模式血量
-        private NetworkVariable<float> networkHealth = new NetworkVariable<float>();
-#endif
+        [Header("音效")]
+        [SerializeField] private AudioClip hitSound;
+        [SerializeField] private AudioClip destroySound;
 
-        // 本地模式血量
-        private float localHealth;
+        // 网络同步变量
+        private NetworkVariable<float> _currentHealth = new NetworkVariable<float>(
+            5000f,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
-        // 判断是否为本地模式
-        private bool IsLocalMode => LocalGameMode.IsLocalMode;
+        private NetworkVariable<int> _ownerId = new NetworkVariable<int>(
+            0,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
-#if UNITY_NETCODE
-        public float CurrentHealth => IsLocalMode ? localHealth : networkHealth.Value;
-#else
-        public float CurrentHealth => localHealth;
-#endif
+        // 事件
+        public event Action<float, float> OnHealthChanged; // currentHealth, maxHealth
+        public event Action OnCastleDestroyed;
+
+        // 属性
+        public float CurrentHealth => _currentHealth.Value;
         public float MaxHealth => maxHealth;
-        public bool IsDestroyed => CurrentHealth <= 0;
+        public int OwnerId => _ownerId.Value;
+        public bool IsDestroyed => _currentHealth.Value <= 0;
+        public float HealthPercentage => _currentHealth.Value / maxHealth;
 
-#if UNITY_NETCODE
+        // 组件
+        private AudioSource _audioSource;
+
+        private void Awake()
+        {
+            _audioSource = GetComponent<AudioSource>();
+            if (_audioSource == null)
+            {
+                _audioSource = gameObject.AddComponent<AudioSource>();
+            }
+        }
+
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
-            if (IsServer)
-            {
-                networkHealth.Value = maxHealth;
-            }
-
-            networkHealth.OnValueChanged += OnHealthChanged;
+            _currentHealth.OnValueChanged += HandleHealthChanged;
         }
 
         public override void OnNetworkDespawn()
         {
             base.OnNetworkDespawn();
-            networkHealth.OnValueChanged -= OnHealthChanged;
+
+            _currentHealth.OnValueChanged -= HandleHealthChanged;
         }
 
         /// <summary>
-        /// 受到伤害（网络模式）
+        /// 初始化城堡
+        /// </summary>
+        public void Initialize(int ownerId, float health)
+        {
+            if (!IsServer) return;
+
+            _ownerId.Value = ownerId;
+            maxHealth = health;
+            _currentHealth.Value = health;
+
+            Debug.Log($"[Castle] 城堡初始化 - 所有者: Player {ownerId}, 血量: {health}");
+        }
+
+        #region 伤害处理
+
+        /// <summary>
+        /// 受到伤害（ServerRpc）
         /// </summary>
         [ServerRpc(RequireOwnership = false)]
-        public void TakeDamageServerRpc(float damage)
+        public void TakeDamageServerRpc(float damage, ServerRpcParams rpcParams = default)
         {
-            if (IsDestroyed) return;
+            ApplyDamage(damage);
+        }
 
-            networkHealth.Value = Mathf.Max(0, networkHealth.Value - damage);
+        /// <summary>
+        /// 直接受到伤害（仅服务器调用）
+        /// </summary>
+        public void TakeDamage(float damage)
+        {
+            if (!IsServer) return;
+            ApplyDamage(damage);
+        }
 
-            if (networkHealth.Value <= 0)
+        private void ApplyDamage(float damage)
+        {
+            if (IsDestroyed || damage <= 0) return;
+
+            float newHealth = Mathf.Max(0, _currentHealth.Value - damage);
+            _currentHealth.Value = newHealth;
+
+            Debug.Log($"[Castle] Player {_ownerId.Value} 城堡受到 {damage} 伤害, 剩余血量: {newHealth}");
+
+            // 播放受击特效
+            PlayHitEffectClientRpc();
+
+            // 检查是否被摧毁
+            if (newHealth <= 0)
             {
-                OnCastleDestroyed();
+                HandleDestruction();
             }
+        }
+
+        private void HandleDestruction()
+        {
+            Debug.Log($"[Castle] Player {_ownerId.Value} 城堡被摧毁!");
+
+            // 通知GameManager
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.OnCastleDestroyed(_ownerId.Value);
+            }
+
+            // 播放摧毁特效
+            PlayDestroyEffectClientRpc();
+        }
+
+        #endregion
+
+        #region 特效和音效
+
+        [ClientRpc]
+        private void PlayHitEffectClientRpc()
+        {
+            // 播放受击特效
+            if (hitEffectPrefab != null)
+            {
+                Instantiate(hitEffectPrefab, transform.position, Quaternion.identity);
+            }
+
+            // 播放受击音效
+            if (hitSound != null && _audioSource != null)
+            {
+                _audioSource.PlayOneShot(hitSound);
+            }
+
+            OnHealthChanged?.Invoke(_currentHealth.Value, maxHealth);
         }
 
         [ClientRpc]
         private void PlayDestroyEffectClientRpc()
         {
-            // 播放城堡摧毁动画和音效
-        }
-#endif
+            // 播放摧毁特效
+            if (destroyEffectPrefab != null)
+            {
+                Instantiate(destroyEffectPrefab, transform.position, Quaternion.identity);
+            }
 
-        private void Start()
+            // 播放摧毁音效
+            if (destroySound != null && _audioSource != null)
+            {
+                _audioSource.PlayOneShot(destroySound);
+            }
+
+            OnCastleDestroyed?.Invoke();
+        }
+
+        #endregion
+
+        #region 事件处理
+
+        private void HandleHealthChanged(float previousValue, float newValue)
         {
-            // 本地模式初始化
-            if (IsLocalMode)
+            OnHealthChanged?.Invoke(newValue, maxHealth);
+
+            // 血量警告
+            if (newValue <= maxHealth * 0.25f && previousValue > maxHealth * 0.25f)
             {
-                localHealth = maxHealth;
-                Debug.Log($"Castle {ownerId} initialized in local mode with {localHealth} HP");
+                Debug.LogWarning($"[Castle] Player {_ownerId.Value} 城堡血量低于25%!");
             }
         }
 
-        /// <summary>
-        /// 受到伤害（本地模式直接调用）
-        /// </summary>
-        public void TakeDamage(float damage)
-        {
-            if (IsDestroyed) return;
+        #endregion
 
-            if (IsLocalMode)
-            {
-                float oldHealth = localHealth;
-                localHealth = Mathf.Max(0, localHealth - damage);
-                OnHealthChanged(oldHealth, localHealth);
-
-                if (localHealth <= 0)
-                {
-                    OnCastleDestroyed();
-                }
-            }
-#if UNITY_NETCODE
-            else
-            {
-                TakeDamageServerRpc(damage);
-            }
-#endif
-        }
-
-        private void OnHealthChanged(float oldHealth, float newHealth)
-        {
-            Debug.Log($"Castle {ownerId} Health: {newHealth}/{maxHealth}");
-
-            if (newHealth < oldHealth)
-            {
-                PlayHitEffect();
-            }
-        }
-
-        private void OnCastleDestroyed()
-        {
-            Debug.Log($"Castle {ownerId} destroyed!");
-
-            if (GameManager.Instance != null)
-            {
-                GameManager.Instance.OnCastleDestroyed(ownerId);
-            }
-
-#if UNITY_NETCODE
-            if (!IsLocalMode)
-            {
-                PlayDestroyEffectClientRpc();
-            }
-#endif
-        }
-
-        private void PlayHitEffect()
-        {
-            // 播放城堡受击特效
-        }
+        #region 碰撞检测
 
         private void OnTriggerEnter(Collider other)
         {
-            if (IsLocalMode)
-            {
-                var localUnit = other.GetComponent<LocalUnit>();
-                if (localUnit != null && localUnit.OwnerId != ownerId)
-                {
-                    TakeDamage(localUnit.AttackDamage);
-                    localUnit.Die();
-                    return;
-                }
-            }
+            if (!IsServer) return;
 
-#if UNITY_NETCODE
-            var unit = other.GetComponent<Units.UnitBase>();
-            if (unit != null && unit.ownerId.Value != ownerId)
+            // 检测敌方单位
+            UnitBase unit = other.GetComponent<UnitBase>();
+            if (unit != null && unit.OwnerId != _ownerId.Value)
             {
-                if (IsServer)
-                {
-                    TakeDamageServerRpc(unit.unitData.attackDamage);
-                    Destroy(unit.gameObject);
-                }
+                // 单位对城堡造成伤害
+                float damage = unit.GetBuildingDamage();
+                TakeDamage(damage);
+
+                // 单位自毁（撞击城堡后死亡）
+                unit.Die();
             }
-#endif
         }
+
+        #endregion
+
+        #region 工具方法
+
+        /// <summary>
+        /// 治疗城堡
+        /// </summary>
+        [ServerRpc(RequireOwnership = false)]
+        public void HealServerRpc(float amount)
+        {
+            if (IsDestroyed || amount <= 0) return;
+
+            float newHealth = Mathf.Min(maxHealth, _currentHealth.Value + amount);
+            _currentHealth.Value = newHealth;
+
+            Debug.Log($"[Castle] Player {_ownerId.Value} 城堡恢复 {amount} 血量, 当前血量: {newHealth}");
+        }
+
+        /// <summary>
+        /// 获取血量比例
+        /// </summary>
+        public float GetHealthRatio()
+        {
+            return _currentHealth.Value / maxHealth;
+        }
+
+        /// <summary>
+        /// 检查城堡是否属于指定玩家
+        /// </summary>
+        public bool BelongsTo(int playerId)
+        {
+            return _ownerId.Value == playerId;
+        }
+
+        #endregion
     }
 }
