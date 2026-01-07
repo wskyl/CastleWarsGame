@@ -1,223 +1,94 @@
 using UnityEngine;
 using CastleWars.Data;
-using CastleWars.Units;
 using CastleWars.Core;
-
-#if UNITY_NETCODE
-using Unity.Netcode;
-#endif
+using System.Collections.Generic;
 
 namespace CastleWars.Buildings
 {
     /// <summary>
-    /// 建筑基类 - 负责生产单位
-    /// 支持本地模式和网络模式
+    /// 建筑基类 - 负责自动生产单位（纯本地模式）
     /// </summary>
-#if UNITY_NETCODE
-    public class BuildingBase : NetworkBehaviour
-#else
     public class BuildingBase : MonoBehaviour
-#endif
     {
         [Header("建筑配置")]
         public BuildingData buildingData;
 
         [Header("所属玩家")]
-#if UNITY_NETCODE
-        public NetworkVariable<int> ownerId = new NetworkVariable<int>();
-#else
-        private int _ownerId;
-        public int OwnerIdValue
-        {
-            get => _ownerId;
-            set => _ownerId = value;
-        }
-#endif
+        public int OwnerId { get; private set; }
 
         [Header("生产设置")]
-        public Transform spawnPoint; // 单位生成位置
+        [SerializeField] private Transform spawnPoint;
 
         // 生产状态
         private float productionTimer = 0f;
         private bool isProducing = true;
 
-        // 对象池
-        private UnitPool unitPool;
+        // 属性
+        public bool IsProducing => isProducing;
+        public float ProductionProgress => buildingData != null ? productionTimer / buildingData.productionInterval : 0f;
 
-        // 本地模式判断
-        private bool IsLocalMode => LocalGameMode.IsLocalMode;
-
-#if UNITY_NETCODE
-        public override void OnNetworkSpawn()
+        /// <summary>
+        /// 初始化建筑
+        /// </summary>
+        public void Initialize(int ownerId)
         {
-            base.OnNetworkSpawn();
+            OwnerId = ownerId;
+            productionTimer = 0f;
+            isProducing = true;
 
-            if (IsServer)
-            {
-                InitializePool();
-            }
-        }
-#endif
+            SetTeamColor();
 
-        private void Start()
-        {
-            // 本地模式初始化
-            if (IsLocalMode)
-            {
-                InitializePool();
-            }
+            Debug.Log($"[BuildingBase] Building initialized for player {ownerId}");
         }
 
-        private void InitializePool()
+        private void SetTeamColor()
         {
-            if (buildingData != null && buildingData.producedUnit != null && buildingData.producedUnit.prefab != null)
+            Renderer renderer = GetComponent<Renderer>();
+            if (renderer != null)
             {
-                unitPool = new UnitPool(buildingData.producedUnit.prefab, 5);
+                renderer.material.color = OwnerId == 1 ? new Color(0.3f, 0.5f, 0.9f) : new Color(0.9f, 0.3f, 0.3f);
             }
         }
 
         private void Update()
         {
-            if (IsLocalMode)
-            {
-                UpdateLocalMode();
-            }
-#if UNITY_NETCODE
-            else
-            {
-                UpdateNetworkMode();
-            }
-#endif
-        }
+            if (GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
+                return;
 
-        private void UpdateLocalMode()
-        {
-            if (isProducing && buildingData != null && buildingData.producedUnit != null)
-            {
-                productionTimer += Time.deltaTime;
+            if (!isProducing || buildingData == null || buildingData.producedUnit == null)
+                return;
 
-                if (productionTimer >= buildingData.productionInterval)
-                {
-                    ProduceUnitLocal();
-                    productionTimer = 0f;
-                }
+            productionTimer += Time.deltaTime;
+
+            if (productionTimer >= buildingData.productionInterval)
+            {
+                ProduceUnit();
+                productionTimer = 0f;
             }
         }
-
-#if UNITY_NETCODE
-        private void UpdateNetworkMode()
-        {
-            // 只在服务器上执行生产逻辑
-            if (!IsServer) return;
-
-            if (isProducing && buildingData != null && buildingData.producedUnit != null)
-            {
-                productionTimer += Time.deltaTime;
-
-                if (productionTimer >= buildingData.productionInterval)
-                {
-                    ProduceUnitNetwork();
-                    productionTimer = 0f;
-                }
-            }
-        }
-#endif
 
         /// <summary>
-        /// 本地模式生产单位
+        /// 生产单位
         /// </summary>
-        private void ProduceUnitLocal()
+        private void ProduceUnit()
         {
             if (buildingData == null || buildingData.producedUnit == null) return;
 
-            Vector3 spawnPos = spawnPoint != null ? spawnPoint.position : transform.position + Vector3.forward;
-
-            // 使用LocalUnitSpawner生成单位
-            if (LocalUnitSpawner.Instance != null)
+            if (UnitSpawner.Instance != null)
             {
-#if UNITY_NETCODE
-                LocalUnitSpawner.Instance.SpawnUnit(ownerId.Value, buildingData.producedUnit);
-#else
-                LocalUnitSpawner.Instance.SpawnUnit(_ownerId, buildingData.producedUnit);
-#endif
-            }
-            else
-            {
-                // 备用方案：直接从对象池获取
-                if (unitPool != null)
-                {
-                    GameObject unitObj = unitPool.Get();
-                    unitObj.transform.position = spawnPos;
-
-                    LocalUnit localUnit = unitObj.GetComponent<LocalUnit>();
-                    if (localUnit == null)
-                    {
-                        localUnit = unitObj.AddComponent<LocalUnit>();
-                    }
-#if UNITY_NETCODE
-                    localUnit.Initialize(ownerId.Value, buildingData.producedUnit);
-#else
-                    localUnit.Initialize(_ownerId, buildingData.producedUnit);
-#endif
-                }
+                UnitSpawner.Instance.SpawnUnit(OwnerId, buildingData.producedUnit);
+                PlayProductionEffect();
             }
 
-            // 播放生产特效
-            PlayProductionEffect();
-            PlayProductionSound();
+            Debug.Log($"[BuildingBase] Produced unit for player {OwnerId}");
         }
 
-#if UNITY_NETCODE
         /// <summary>
-        /// 网络模式生产单位
+        /// 播放生产特效
         /// </summary>
-        private void ProduceUnitNetwork()
-        {
-            if (buildingData == null || buildingData.producedUnit == null) return;
-
-            Vector3 spawnPos = spawnPoint != null ? spawnPoint.position : transform.position + Vector3.forward;
-
-            // 从对象池获取单位
-            if (unitPool == null) return;
-
-            GameObject unitObj = unitPool.Get();
-            unitObj.transform.position = spawnPos;
-
-            // 设置单位所属
-            UnitBase unit = unitObj.GetComponent<UnitBase>();
-            if (unit != null)
-            {
-                unit.ownerId.Value = ownerId.Value;
-                unit.unitData = buildingData.producedUnit;
-            }
-
-            // 生成网络对象
-            NetworkObject netObj = unitObj.GetComponent<NetworkObject>();
-            if (netObj != null && !netObj.IsSpawned)
-            {
-                netObj.Spawn();
-            }
-
-            // 通知客户端播放生产特效
-            OnUnitProducedClientRpc();
-        }
-
-        [ClientRpc]
-        private void OnUnitProducedClientRpc()
-        {
-            PlayProductionEffect();
-            PlayProductionSound();
-        }
-#endif
-
         private void PlayProductionEffect()
         {
-            // 实现生产特效
-        }
-
-        private void PlayProductionSound()
-        {
-            // 实现生产音效
+            // TODO: 实现生产特效
         }
 
         /// <summary>
@@ -248,17 +119,17 @@ namespace CastleWars.Buildings
     }
 
     /// <summary>
-    /// 简单的单位对象池
+    /// 简单的对象池
     /// </summary>
-    public class UnitPool
+    public class ObjectPool
     {
         private GameObject prefab;
-        private System.Collections.Generic.Queue<GameObject> pool;
+        private Queue<GameObject> pool;
 
-        public UnitPool(GameObject prefab, int initialSize)
+        public ObjectPool(GameObject prefab, int initialSize)
         {
             this.prefab = prefab;
-            this.pool = new System.Collections.Generic.Queue<GameObject>();
+            this.pool = new Queue<GameObject>();
 
             for (int i = 0; i < initialSize; i++)
             {
