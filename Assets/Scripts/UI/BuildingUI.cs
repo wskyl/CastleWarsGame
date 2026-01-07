@@ -1,6 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 using CastleWars.Data;
 using CastleWars.Economy;
 using CastleWars.Core;
@@ -25,7 +23,7 @@ namespace CastleWars.UI
         private BuildingManager buildingManager;
         private PlayerEconomy economy;
         private LocalPlayer localPlayer;
-        private List<BuildingButton> buildingButtons = new List<BuildingButton>();
+        private List<BuildingButtonSimple> buildingButtons = new List<BuildingButtonSimple>();
 
         private int selectedSlot = -1;
 
@@ -67,7 +65,6 @@ namespace CastleWars.UI
             var networkPlayers = FindObjectsOfType<NetworkPlayer>();
             foreach (var player in networkPlayers)
             {
-                // 本地模式下使用第一个玩家
                 return player.gameObject;
             }
             return null;
@@ -80,7 +77,7 @@ namespace CastleWars.UI
             foreach (BuildingData building in availableBuildings)
             {
                 GameObject buttonObj = Instantiate(buildingButtonPrefab, buildingListContainer);
-                BuildingButton button = buttonObj.GetComponent<BuildingButton>();
+                BuildingButtonSimple button = buttonObj.GetComponent<BuildingButtonSimple>();
 
                 if (button != null)
                 {
@@ -157,54 +154,40 @@ namespace CastleWars.UI
     }
 
     /// <summary>
-    /// 建筑按钮组件
+    /// 简化的建筑按钮组件 - 不依赖UI模块
     /// </summary>
-    public class BuildingButton : MonoBehaviour
+    public class BuildingButtonSimple : MonoBehaviour
     {
-        [Header("UI组件")]
-        public Image iconImage;
-        public TextMeshProUGUI nameText;
-        public TextMeshProUGUI costText;
-        public Button button;
-
         private BuildingData buildingData;
         private System.Action<BuildingData> onClickCallback;
+        private bool canAfford = true;
 
         public void Initialize(BuildingData data, System.Action<BuildingData> onClick)
         {
             buildingData = data;
             onClickCallback = onClick;
-
-            if (iconImage != null && data.icon != null) iconImage.sprite = data.icon;
-            if (nameText != null) nameText.text = data.buildingName;
-            if (costText != null) costText.text = $"{data.goldCost} Gold";
-
-            if (button != null)
-            {
-                button.onClick.AddListener(OnButtonClicked);
-            }
         }
 
         public void UpdateState(int currentGold)
         {
             if (buildingData == null) return;
+            canAfford = currentGold >= buildingData.goldCost;
+        }
 
-            bool canAfford = currentGold >= buildingData.goldCost;
-
-            if (button != null)
+        /// <summary>
+        /// 由外部调用触发点击
+        /// </summary>
+        public void OnClick()
+        {
+            if (canAfford)
             {
-                button.interactable = canAfford;
-            }
-
-            if (costText != null)
-            {
-                costText.color = canAfford ? Color.green : Color.red;
+                onClickCallback?.Invoke(buildingData);
             }
         }
 
-        private void OnButtonClicked()
+        private void OnMouseDown()
         {
-            onClickCallback?.Invoke(buildingData);
+            OnClick();
         }
     }
 }

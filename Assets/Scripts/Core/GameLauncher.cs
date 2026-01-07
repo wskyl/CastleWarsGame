@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace CastleWars.Core
 {
@@ -9,9 +8,9 @@ namespace CastleWars.Core
     public class GameLauncher : MonoBehaviour
     {
         [Header("UI元素")]
-        [SerializeField] private Button localGameButton;
-        [SerializeField] private Button hostGameButton;
-        [SerializeField] private Button joinGameButton;
+        [SerializeField] private GameObject localGameButton;
+        [SerializeField] private GameObject hostGameButton;
+        [SerializeField] private GameObject joinGameButton;
         [SerializeField] private GameObject menuPanel;
         [SerializeField] private GameObject gamePanel;
 
@@ -24,31 +23,10 @@ namespace CastleWars.Core
 
         private void Start()
         {
-            // 设置按钮事件
-            SetupButtons();
-
             // 自动启动本地游戏
             if (autoStartLocalGame)
             {
                 StartLocalGame();
-            }
-        }
-
-        private void SetupButtons()
-        {
-            if (localGameButton != null)
-            {
-                localGameButton.onClick.AddListener(StartLocalGame);
-            }
-
-            if (hostGameButton != null)
-            {
-                hostGameButton.onClick.AddListener(StartHostGame);
-            }
-
-            if (joinGameButton != null)
-            {
-                joinGameButton.onClick.AddListener(JoinGame);
             }
         }
 
@@ -104,6 +82,7 @@ namespace CastleWars.Core
             if (menuPanel != null) menuPanel.SetActive(false);
             if (gamePanel != null) gamePanel.SetActive(true);
 
+#if UNITY_NETCODE
             // 启动网络主机
             if (Unity.Netcode.NetworkManager.Singleton != null)
             {
@@ -113,6 +92,9 @@ namespace CastleWars.Core
             {
                 Debug.LogWarning("NetworkManager not found. Please add NetworkManager to the scene.");
             }
+#else
+            Debug.LogWarning("Network mode not available. Unity.Netcode package not installed.");
+#endif
         }
 
         /// <summary>
@@ -129,6 +111,7 @@ namespace CastleWars.Core
             if (menuPanel != null) menuPanel.SetActive(false);
             if (gamePanel != null) gamePanel.SetActive(true);
 
+#if UNITY_NETCODE
             // 加入网络游戏
             if (Unity.Netcode.NetworkManager.Singleton != null)
             {
@@ -138,6 +121,9 @@ namespace CastleWars.Core
             {
                 Debug.LogWarning("NetworkManager not found. Please add NetworkManager to the scene.");
             }
+#else
+            Debug.LogWarning("Network mode not available. Unity.Netcode package not installed.");
+#endif
         }
 
         /// <summary>
@@ -145,11 +131,13 @@ namespace CastleWars.Core
         /// </summary>
         public void ReturnToMenu()
         {
+#if UNITY_NETCODE
             // 停止网络
             if (Unity.Netcode.NetworkManager.Singleton != null && Unity.Netcode.NetworkManager.Singleton.IsListening)
             {
                 Unity.Netcode.NetworkManager.Singleton.Shutdown();
             }
+#endif
 
             // 停止本地游戏
             if (LocalGameMode.Instance != null)

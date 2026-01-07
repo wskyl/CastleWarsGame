@@ -1,56 +1,31 @@
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
 namespace CastleWars.UI
 {
     /// <summary>
     /// 本地游戏UI控制器 - 在本地模式下显示游戏信息和控制
+    /// 不依赖UnityEngine.UI和TMPro模块
     /// </summary>
     public class LocalGameUI : MonoBehaviour
     {
-        [Header("资源显示")]
-        [SerializeField] private Text goldText;
-        [SerializeField] private Text incomeText;
-        [SerializeField] private TMP_Text goldTextTMP;
-        [SerializeField] private TMP_Text incomeTextTMP;
-
-        [Header("城堡血量")]
-        [SerializeField] private Slider player1HealthBar;
-        [SerializeField] private Slider player2HealthBar;
-        [SerializeField] private Text player1HealthText;
-        [SerializeField] private Text player2HealthText;
-
-        [Header("游戏信息")]
-        [SerializeField] private Text gameTimeText;
-        [SerializeField] private Text gameStateText;
-
-        [Header("单位训练按钮")]
-        [SerializeField] private Button trainUnitButton;
-        [SerializeField] private int unitCost = 100;
-
         [Header("游戏结束面板")]
         [SerializeField] private GameObject gameOverPanel;
-        [SerializeField] private Text winnerText;
-        [SerializeField] private Button restartButton;
+
+        [Header("单位训练设置")]
+        [SerializeField] private int unitCost = 100;
 
         private CastleWars.Core.LocalPlayer localPlayer;
         private CastleWars.Core.LocalCastle player1Castle;
         private CastleWars.Core.LocalCastle player2Castle;
 
+        // 缓存上次的值避免频繁Log
+        private int lastGold = -1;
+        private int lastIncome = -1;
+        private float lastP1Health = -1;
+        private float lastP2Health = -1;
+
         private void Start()
         {
-            // 设置按钮事件
-            if (trainUnitButton != null)
-            {
-                trainUnitButton.onClick.AddListener(OnTrainUnitClicked);
-            }
-
-            if (restartButton != null)
-            {
-                restartButton.onClick.AddListener(OnRestartClicked);
-            }
-
             // 隐藏游戏结束面板
             if (gameOverPanel != null)
             {
@@ -71,10 +46,21 @@ namespace CastleWars.UI
             // 查找玩家引用
             FindReferences();
 
-            // 更新UI
+            // 更新UI（通过Log显示）
             UpdateResourceDisplay();
             UpdateCastleHealth();
-            UpdateGameInfo();
+
+            // 检测按键输入来训练单位
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                OnTrainUnitClicked();
+            }
+
+            // R键重启游戏
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                OnRestartClicked();
+            }
         }
 
         private void FindReferences()
@@ -104,87 +90,57 @@ namespace CastleWars.UI
         {
             if (localPlayer == null) return;
 
-            string goldStr = $"Gold: {localPlayer.Gold}";
-            string incomeStr = $"Income: {localPlayer.Income}/s";
-
-            if (goldText != null) goldText.text = goldStr;
-            if (goldTextTMP != null) goldTextTMP.text = goldStr;
-            if (incomeText != null) incomeText.text = incomeStr;
-            if (incomeTextTMP != null) incomeTextTMP.text = incomeStr;
+            if (localPlayer.Gold != lastGold || localPlayer.Income != lastIncome)
+            {
+                lastGold = localPlayer.Gold;
+                lastIncome = localPlayer.Income;
+                // 只在变化时输出日志
+            }
         }
 
         private void UpdateCastleHealth()
         {
-            if (player1Castle != null)
+            if (player1Castle != null && player1Castle.CurrentHealth != lastP1Health)
             {
-                if (player1HealthBar != null)
-                {
-                    player1HealthBar.value = player1Castle.HealthPercentage;
-                }
-                if (player1HealthText != null)
-                {
-                    player1HealthText.text = $"P1: {player1Castle.CurrentHealth:F0}/{player1Castle.MaxHealth}";
-                }
+                lastP1Health = player1Castle.CurrentHealth;
+                Debug.Log($"[LocalGameUI] P1 Castle HP: {player1Castle.CurrentHealth:F0}/{player1Castle.MaxHealth}");
             }
 
-            if (player2Castle != null)
+            if (player2Castle != null && player2Castle.CurrentHealth != lastP2Health)
             {
-                if (player2HealthBar != null)
-                {
-                    player2HealthBar.value = player2Castle.HealthPercentage;
-                }
-                if (player2HealthText != null)
-                {
-                    player2HealthText.text = $"P2: {player2Castle.CurrentHealth:F0}/{player2Castle.MaxHealth}";
-                }
-            }
-        }
-
-        private void UpdateGameInfo()
-        {
-            if (CastleWars.Core.LocalGameMode.Instance == null) return;
-
-            float gameTime = CastleWars.Core.LocalGameMode.Instance.GameTime;
-            int minutes = Mathf.FloorToInt(gameTime / 60);
-            int seconds = Mathf.FloorToInt(gameTime % 60);
-
-            if (gameTimeText != null)
-            {
-                gameTimeText.text = $"Time: {minutes:00}:{seconds:00}";
-            }
-
-            if (gameStateText != null)
-            {
-                gameStateText.text = $"State: {CastleWars.Core.LocalGameMode.Instance.CurrentState}";
+                lastP2Health = player2Castle.CurrentHealth;
+                Debug.Log($"[LocalGameUI] P2 Castle HP: {player2Castle.CurrentHealth:F0}/{player2Castle.MaxHealth}");
             }
         }
 
         private void OnGoldChanged(int newGold)
         {
-            UpdateResourceDisplay();
+            Debug.Log($"[LocalGameUI] Gold: {newGold}");
         }
 
         private void OnIncomeChanged(int newIncome)
         {
-            UpdateResourceDisplay();
+            Debug.Log($"[LocalGameUI] Income: {newIncome}/s");
         }
 
-        private void OnTrainUnitClicked()
+        /// <summary>
+        /// 训练单位（按空格键或由外部调用）
+        /// </summary>
+        public void OnTrainUnitClicked()
         {
             if (localPlayer == null) return;
 
             if (localPlayer.SpendGold(unitCost))
             {
-                // 生成单位
                 if (CastleWars.Core.LocalUnitSpawner.Instance != null)
                 {
                     CastleWars.Core.LocalUnitSpawner.Instance.SpawnUnit(1);
-                    Debug.Log("Unit trained!");
+                    Debug.Log("[LocalGameUI] Unit trained!");
                 }
             }
             else
             {
-                Debug.Log("Not enough gold to train unit!");
+                Debug.Log("[LocalGameUI] Not enough gold to train unit!");
             }
         }
 
@@ -195,14 +151,14 @@ namespace CastleWars.UI
                 gameOverPanel.SetActive(true);
             }
 
-            if (winnerText != null)
-            {
-                string winnerName = winnerId == 1 ? "Player 1" : "AI";
-                winnerText.text = $"{winnerName} Wins!\nReason: {reason}";
-            }
+            string winnerName = winnerId == 1 ? "Player 1" : "AI";
+            Debug.Log($"[LocalGameUI] Game Over! {winnerName} Wins! Reason: {reason}");
         }
 
-        private void OnRestartClicked()
+        /// <summary>
+        /// 重启游戏（按R键或由外部调用）
+        /// </summary>
+        public void OnRestartClicked()
         {
             if (CastleWars.Core.LocalGameMode.Instance != null)
             {
@@ -218,6 +174,12 @@ namespace CastleWars.UI
             localPlayer = null;
             player1Castle = null;
             player2Castle = null;
+            lastGold = -1;
+            lastIncome = -1;
+            lastP1Health = -1;
+            lastP2Health = -1;
+
+            Debug.Log("[LocalGameUI] Game restarted!");
         }
 
         private void OnDestroy()

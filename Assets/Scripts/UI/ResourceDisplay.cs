@@ -1,5 +1,4 @@
 using UnityEngine;
-using TMPro;
 using CastleWars.Economy;
 using CastleWars.Core;
 
@@ -8,15 +7,15 @@ namespace CastleWars.UI
     /// <summary>
     /// 资源显示UI - 显示玩家的金币和收入
     /// 支持本地模式和网络模式
+    /// 不依赖TMPro，使用Debug.Log输出
     /// </summary>
     public class ResourceDisplay : MonoBehaviour
     {
-        [Header("UI组件")]
-        [SerializeField] private TextMeshProUGUI goldText;
-        [SerializeField] private TextMeshProUGUI incomeText;
-
         private PlayerEconomy economy;
         private LocalPlayer localPlayer;
+
+        private int lastGold = -1;
+        private int lastIncome = -1;
 
         private void Start()
         {
@@ -44,7 +43,6 @@ namespace CastleWars.UI
             var networkPlayers = FindObjectsOfType<NetworkPlayer>();
             foreach (var player in networkPlayers)
             {
-                // 在本地模式下，使用第一个玩家
                 economy = player.GetComponent<PlayerEconomy>();
                 if (economy != null)
                 {
@@ -60,17 +58,19 @@ namespace CastleWars.UI
 
         private void UpdateGoldDisplay(int gold)
         {
-            if (goldText != null)
+            if (gold != lastGold)
             {
-                goldText.text = $"Gold: {gold}";
+                lastGold = gold;
+                Debug.Log($"[ResourceDisplay] Gold: {gold}");
             }
         }
 
         private void UpdateIncomeDisplay(int income)
         {
-            if (incomeText != null)
+            if (income != lastIncome)
             {
-                incomeText.text = $"+{income}/s";
+                lastIncome = income;
+                Debug.Log($"[ResourceDisplay] Income: +{income}/s");
             }
         }
 
