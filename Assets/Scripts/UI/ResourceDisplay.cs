@@ -1,91 +1,64 @@
 using UnityEngine;
-using TMPro;
 using CastleWars.Economy;
 using CastleWars.Core;
 
 namespace CastleWars.UI
 {
     /// <summary>
-    /// 资源显示UI - 显示玩家的金币和收入
-    /// 支持本地模式和网络模式
+    /// 资源显示UI - 显示玩家的金币和收入（纯本地模式）
     /// </summary>
     public class ResourceDisplay : MonoBehaviour
     {
-        [Header("UI组件")]
-        [SerializeField] private TextMeshProUGUI goldText;
-        [SerializeField] private TextMeshProUGUI incomeText;
+        private PlayerController playerController;
 
-        private PlayerEconomy economy;
-        private LocalPlayer localPlayer;
+        private int lastGold = -1;
+        private int lastIncome = -1;
 
         private void Start()
         {
-            FindPlayerEconomy();
+            FindPlayer();
         }
 
-        private void FindPlayerEconomy()
+        private void FindPlayer()
         {
-            // 优先使用本地模式
-            if (LocalGameMode.IsLocalMode && LocalGameMode.Instance != null)
+            if (GameManager.Instance != null)
             {
-                localPlayer = LocalGameMode.Instance.GetPlayer(1);
-                if (localPlayer != null)
+                playerController = GameManager.Instance.GetPlayer(1);
+                if (playerController != null)
                 {
-                    localPlayer.OnGoldChanged += UpdateGoldDisplay;
-                    localPlayer.OnIncomeChanged += UpdateIncomeDisplay;
+                    playerController.OnGoldChanged += UpdateGoldDisplay;
+                    playerController.OnIncomeChanged += UpdateIncomeDisplay;
 
-                    UpdateGoldDisplay(localPlayer.Gold);
-                    UpdateIncomeDisplay(localPlayer.Income);
-                    return;
-                }
-            }
-
-            // 网络模式
-            var networkPlayers = FindObjectsOfType<NetworkPlayer>();
-            foreach (var player in networkPlayers)
-            {
-                // 在本地模式下，使用第一个玩家
-                economy = player.GetComponent<PlayerEconomy>();
-                if (economy != null)
-                {
-                    economy.OnGoldChanged += UpdateGoldDisplay;
-                    economy.OnIncomeChanged += UpdateIncomeDisplay;
-
-                    UpdateGoldDisplay(economy.Gold);
-                    UpdateIncomeDisplay(economy.Income);
-                    break;
+                    UpdateGoldDisplay(playerController.Gold);
+                    UpdateIncomeDisplay(playerController.Income);
                 }
             }
         }
 
         private void UpdateGoldDisplay(int gold)
         {
-            if (goldText != null)
+            if (gold != lastGold)
             {
-                goldText.text = $"Gold: {gold}";
+                lastGold = gold;
+                Debug.Log($"[ResourceDisplay] Gold: {gold}");
             }
         }
 
         private void UpdateIncomeDisplay(int income)
         {
-            if (incomeText != null)
+            if (income != lastIncome)
             {
-                incomeText.text = $"+{income}/s";
+                lastIncome = income;
+                Debug.Log($"[ResourceDisplay] Income: +{income}/s");
             }
         }
 
         private void OnDestroy()
         {
-            if (economy != null)
+            if (playerController != null)
             {
-                economy.OnGoldChanged -= UpdateGoldDisplay;
-                economy.OnIncomeChanged -= UpdateIncomeDisplay;
-            }
-
-            if (localPlayer != null)
-            {
-                localPlayer.OnGoldChanged -= UpdateGoldDisplay;
-                localPlayer.OnIncomeChanged -= UpdateIncomeDisplay;
+                playerController.OnGoldChanged -= UpdateGoldDisplay;
+                playerController.OnIncomeChanged -= UpdateIncomeDisplay;
             }
         }
     }

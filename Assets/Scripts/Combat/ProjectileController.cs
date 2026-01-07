@@ -5,8 +5,7 @@ using CastleWars.Core;
 namespace CastleWars.Combat
 {
     /// <summary>
-    /// 投射物控制器 - 处理远程攻击的子弹/箭矢
-    /// 支持本地模式和网络模式
+    /// 投射物控制器 - 处理远程攻击的子弹/箭矢（纯本地模式）
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class ProjectileController : MonoBehaviour
@@ -66,36 +65,32 @@ namespace CastleWars.Combat
 
         private void OnTriggerEnter(Collider other)
         {
-            // 本地模式：检查LocalUnit
-            if (LocalGameMode.IsLocalMode)
+            // 检查 UnitController
+            UnitController unitController = other.GetComponent<UnitController>();
+            if (unitController != null)
             {
-                LocalUnit localUnit = other.GetComponent<LocalUnit>();
-                if (localUnit != null)
+                if (unitController.OwnerId == attackerId)
                 {
-                    if (localUnit.OwnerId == attackerId)
-                    {
-                        return;
-                    }
-
-                    localUnit.TakeDamage(damage, attackerId);
-
-                    if (hasAOE)
-                    {
-                        PerformAOEDamageLocal(transform.position);
-                    }
-
-                    SpawnHitEffect();
-                    Destroy(gameObject);
                     return;
                 }
+
+                unitController.TakeDamage(damage, attackerId);
+
+                if (hasAOE)
+                {
+                    PerformAOEDamage(transform.position);
+                }
+
+                SpawnHitEffect();
+                Destroy(gameObject);
+                return;
             }
 
-            // 网络模式或通用模式：检查UnitBase
+            // 检查 UnitBase
             UnitBase unit = other.GetComponent<UnitBase>();
             if (unit != null)
             {
-                int unitOwnerId = GetUnitOwnerId(unit);
-                if (unitOwnerId == attackerId)
+                if (unit.OwnerId == attackerId)
                 {
                     return;
                 }
@@ -109,29 +104,16 @@ namespace CastleWars.Combat
 
                 SpawnHitEffect();
                 Destroy(gameObject);
+                return;
             }
-        }
 
-        private int GetUnitOwnerId(UnitBase unit)
-        {
-#if UNITY_NETCODE
-            return unit.ownerId.Value;
-#else
-            return unit.OwnerIdValue;
-#endif
-        }
-
-        private void PerformAOEDamageLocal(Vector3 center)
-        {
-            Collider[] hits = Physics.OverlapSphere(center, aoeRadius);
-
-            foreach (Collider hit in hits)
+            // 检查城堡
+            CastleController castle = other.GetComponent<CastleController>();
+            if (castle != null && castle.OwnerId != attackerId)
             {
-                LocalUnit enemy = hit.GetComponent<LocalUnit>();
-                if (enemy != null && enemy.OwnerId != attackerId)
-                {
-                    enemy.TakeDamage(damage * 0.5f, attackerId);
-                }
+                castle.TakeDamage(damage);
+                SpawnHitEffect();
+                Destroy(gameObject);
             }
         }
 
@@ -141,8 +123,15 @@ namespace CastleWars.Combat
 
             foreach (Collider hit in hits)
             {
+                UnitController enemyController = hit.GetComponent<UnitController>();
+                if (enemyController != null && enemyController.OwnerId != attackerId)
+                {
+                    enemyController.TakeDamage(damage * 0.5f, attackerId);
+                    continue;
+                }
+
                 UnitBase enemy = hit.GetComponent<UnitBase>();
-                if (enemy != null && GetUnitOwnerId(enemy) != attackerId)
+                if (enemy != null && enemy.OwnerId != attackerId)
                 {
                     enemy.TakeDamage(damage * 0.5f, attackerId);
                 }

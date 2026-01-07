@@ -1,10 +1,9 @@
 using UnityEngine;
-using UnityEngine.EventSystems;
 
 namespace CastleWars.UI
 {
     /// <summary>
-    /// 触摸输入处理器 - 处理移动端的触摸操作
+    /// 触摸输入处理器 - 处理移动端的触摸操作（纯本地模式）
     /// </summary>
     public class TouchInputHandler : MonoBehaviour
     {
@@ -43,12 +42,6 @@ namespace CastleWars.UI
             if (Input.touchCount == 1)
             {
                 Touch touch = Input.GetTouch(0);
-
-                // 检查是否点击在UI上
-                if (EventSystem.current.IsPointerOverGameObject(touch.fingerId))
-                {
-                    return;
-                }
 
                 switch (touch.phase)
                 {
@@ -96,6 +89,8 @@ namespace CastleWars.UI
 
         private void PanCamera(Touch touch)
         {
+            if (mainCamera == null) return;
+
             Vector3 delta = mainCamera.ScreenToWorldPoint(touch.position) -
                            mainCamera.ScreenToWorldPoint(lastTouchPosition);
 
@@ -110,6 +105,8 @@ namespace CastleWars.UI
 
         private void ZoomCamera(float increment)
         {
+            if (mainCamera == null) return;
+
             if (mainCamera.orthographic)
             {
                 mainCamera.orthographicSize = Mathf.Clamp(
@@ -128,6 +125,8 @@ namespace CastleWars.UI
 
         private void DetectBuildingSlotTap(Vector2 screenPosition)
         {
+            if (mainCamera == null) return;
+
             Ray ray = mainCamera.ScreenPointToRay(screenPosition);
             RaycastHit hit;
 
@@ -143,6 +142,8 @@ namespace CastleWars.UI
 
         private void HandleMouseInput()
         {
+            if (mainCamera == null) return;
+
             // 鼠标拖拽
             if (Input.GetMouseButtonDown(0))
             {
@@ -151,7 +152,7 @@ namespace CastleWars.UI
             }
             else if (Input.GetMouseButton(0))
             {
-                if (isDragging && !EventSystem.current.IsPointerOverGameObject())
+                if (isDragging)
                 {
                     Vector3 delta = mainCamera.ScreenToWorldPoint(Input.mousePosition) -
                                    mainCamera.ScreenToWorldPoint(lastTouchPosition);
@@ -166,11 +167,7 @@ namespace CastleWars.UI
             else if (Input.GetMouseButtonUp(0))
             {
                 isDragging = false;
-
-                if (!EventSystem.current.IsPointerOverGameObject())
-                {
-                    DetectBuildingSlotTap(Input.mousePosition);
-                }
+                DetectBuildingSlotTap(Input.mousePosition);
             }
 
             // 鼠标滚轮缩放

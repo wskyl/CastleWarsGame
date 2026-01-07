@@ -6,12 +6,12 @@ using CastleWars.Core;
 namespace CastleWars.Units
 {
     /// <summary>
-    /// 单位战斗控制
-    /// 支持本地模式和网络模式
+    /// 单位战斗控制（纯本地模式）
     /// </summary>
     public class UnitCombat : MonoBehaviour
     {
         private UnitBase unitBase;
+        private UnitController unitController;
         private float lastAttackTime;
 
         [Header("战斗设置")]
@@ -24,6 +24,47 @@ namespace CastleWars.Units
         private void Awake()
         {
             unitBase = GetComponent<UnitBase>();
+            unitController = GetComponent<UnitController>();
+        }
+
+        /// <summary>
+        /// 获取所属玩家ID
+        /// </summary>
+        private int GetOwnerId()
+        {
+            if (unitController != null) return unitController.OwnerId;
+            if (unitBase != null) return unitBase.OwnerId;
+            return 0;
+        }
+
+        /// <summary>
+        /// 获取攻击范围
+        /// </summary>
+        private float GetAttackRange()
+        {
+            if (unitController != null) return unitController.AttackRange;
+            if (unitBase != null && unitBase.unitData != null) return unitBase.unitData.attackRange;
+            return 2f;
+        }
+
+        /// <summary>
+        /// 获取攻击伤害
+        /// </summary>
+        private float GetAttackDamage()
+        {
+            if (unitController != null) return unitController.AttackDamage;
+            if (unitBase != null && unitBase.unitData != null) return unitBase.unitData.attackDamage;
+            return 10f;
+        }
+
+        /// <summary>
+        /// 获取攻击速度
+        /// </summary>
+        private float GetAttackSpeed()
+        {
+            if (unitController != null) return unitController.AttackSpeed;
+            if (unitBase != null && unitBase.unitData != null) return unitBase.unitData.attackSpeed;
+            return 1f;
         }
 
         /// <summary>
@@ -31,78 +72,55 @@ namespace CastleWars.Units
         /// </summary>
         public Transform FindNearestEnemy(int myOwnerId)
         {
-            if (unitBase == null || unitBase.unitData == null) return null;
+            float attackRange = GetAttackRange();
 
-            Collider[] colliders = Physics.OverlapSphere(
-                transform.position,
-                unitBase.unitData.attackRange * 2,
-                enemyLayer
-            );
+            Collider[] colliders = Physics.OverlapSphere(transform.position, attackRange * 2, enemyLayer);
 
             Transform nearest = null;
             float nearestDistance = float.MaxValue;
 
             foreach (Collider col in colliders)
             {
-                // 本地模式检查LocalUnit
-                if (LocalGameMode.IsLocalMode)
+                // 检查 UnitController
+                UnitController enemyController = col.GetComponent<UnitController>();
+                if (enemyController != null && enemyController.OwnerId != myOwnerId && !enemyController.IsDead)
                 {
-                    LocalUnit localEnemy = col.GetComponent<LocalUnit>();
-                    if (localEnemy != null && localEnemy.OwnerId != myOwnerId && !localEnemy.IsDead)
+                    float distance = Vector3.Distance(transform.position, col.transform.position);
+                    if (distance < nearestDistance)
                     {
-                        float distance = Vector3.Distance(transform.position, col.transform.position);
-                        if (distance < nearestDistance)
-                        {
-                            nearestDistance = distance;
-                            nearest = col.transform;
-                        }
+                        nearestDistance = distance;
+                        nearest = col.transform;
                     }
                     continue;
                 }
 
-                // 网络模式检查UnitBase
+                // 检查 UnitBase
                 UnitBase enemy = col.GetComponent<UnitBase>();
-                if (enemy == null) continue;
-
-                int enemyOwnerId = GetUnitOwnerId(enemy);
-                if (enemyOwnerId == myOwnerId) continue;
-
-                if (!CanAttackTarget(enemy)) continue;
-
-                float dist = Vector3.Distance(transform.position, col.transform.position);
-                if (dist < nearestDistance)
+                if (enemy != null && enemy.OwnerId != myOwnerId && !enemy.IsDead)
                 {
-                    nearestDistance = dist;
-                    nearest = col.transform;
+                    if (!CanAttackTarget(enemy)) continue;
+
+                    float dist = Vector3.Distance(transform.position, col.transform.position);
+                    if (dist < nearestDistance)
+                    {
+                        nearestDistance = dist;
+                        nearest = col.transform;
+                    }
                 }
             }
 
             return nearest;
         }
 
-        private int GetUnitOwnerId(UnitBase unit)
-        {
-#if UNITY_NETCODE
-            return unit.ownerId.Value;
-#else
-            return unit.OwnerIdValue;
-#endif
-        }
-
-        private int GetMyOwnerId()
-        {
-#if UNITY_NETCODE
-            return unitBase.ownerId.Value;
-#else
-            return unitBase.OwnerIdValue;
-#endif
-        }
-
         private bool CanAttackTarget(UnitBase target)
         {
-            if (target.unitData.unitType == UnitType.Air)
+            if (target.unitData == null) return true;
+            if (unitBase != null && unitBase.unitData != null)
             {
-                return unitBase.unitData.canAttackAir;
+                if (target.unitData.unitType == UnitType.Air)
+                {
+                    return unitBase.unitData.canAttackAir;
+                }
             }
             return true;
         }
@@ -112,9 +130,10 @@ namespace CastleWars.Units
         /// </summary>
         public void Attack(Transform target)
         {
-            if (target == null || unitBase == null || unitBase.unitData == null) return;
+            if (target == null) return;
 
-            if (Time.time < lastAttackTime + (1f / unitBase.unitData.attackSpeed))
+            float attackSpeed = GetAttackSpeed();
+            if (Time.time < lastAttackTime + (1f / attackSpeed))
             {
                 return;
             }
@@ -124,115 +143,111 @@ namespace CastleWars.Units
             Vector3 direction = (target.position - transform.position).normalized;
             transform.rotation = Quaternion.LookRotation(new Vector3(direction.x, 0, direction.z));
 
-            // 本地模式攻击LocalUnit
-            if (LocalGameMode.IsLocalMode)
+            float attackDamage = GetAttackDamage();
+            int myOwnerId = GetOwnerId();
+
+            // 攻击 UnitController
+            UnitController targetController = target.GetComponent<UnitController>();
+            if (targetController != null)
             {
-                LocalUnit localTarget = target.GetComponent<LocalUnit>();
-                if (localTarget != null)
-                {
-                    PerformAttackLocal(localTarget);
-                    return;
-                }
+                PerformAttack(targetController, attackDamage, myOwnerId);
+                return;
             }
 
-            // 网络模式攻击UnitBase
+            // 攻击 UnitBase
             UnitBase targetUnit = target.GetComponent<UnitBase>();
             if (targetUnit != null)
             {
-                if (unitBase.unitData.attackType == AttackType.Melee)
-                {
-                    PerformMeleeAttack(targetUnit);
-                }
-                else
-                {
-                    PerformRangedAttack(target);
-                }
+                PerformAttack(targetUnit, attackDamage, myOwnerId);
+                return;
+            }
+
+            // 攻击城堡
+            CastleController targetCastle = target.GetComponent<CastleController>();
+            if (targetCastle != null)
+            {
+                targetCastle.TakeDamage(attackDamage);
             }
         }
 
-        private void PerformAttackLocal(LocalUnit target)
+        private void PerformAttack(UnitController target, float damage, int attackerId)
         {
             PlayAttackAnimation();
 
-            if (unitBase.unitData.attackType == AttackType.Melee)
-            {
-                int myOwnerId = GetMyOwnerId();
-                target.TakeDamage(unitBase.unitData.attackDamage, myOwnerId);
+            bool isRanged = unitBase != null && unitBase.unitData != null &&
+                           unitBase.unitData.attackType == AttackType.Ranged;
 
-                if (unitBase.unitData.hasAOE)
-                {
-                    PerformAOEDamageLocal(target.transform.position);
-                }
+            if (isRanged && projectilePrefab != null)
+            {
+                SpawnProjectile(target.transform, damage, attackerId);
             }
             else
             {
-                PerformRangedAttack(target.transform);
-            }
-        }
+                target.TakeDamage(damage, attackerId);
 
-        private void PerformMeleeAttack(UnitBase target)
-        {
-            PlayAttackAnimation();
-
-            int myOwnerId = GetMyOwnerId();
-            target.TakeDamage(unitBase.unitData.attackDamage, myOwnerId);
-
-            if (unitBase.unitData.hasAOE)
-            {
-                PerformAOEDamage(target.transform.position);
-            }
-        }
-
-        private void PerformRangedAttack(Transform target)
-        {
-            PlayAttackAnimation();
-
-            if (projectilePrefab != null)
-            {
-                Vector3 spawnPos = attackPoint != null ? attackPoint.position : transform.position + Vector3.up;
-                GameObject projectile = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
-
-                ProjectileController projController = projectile.GetComponent<ProjectileController>();
-                if (projController != null)
+                if (unitBase != null && unitBase.unitData != null && unitBase.unitData.hasAOE)
                 {
-                    int myOwnerId = GetMyOwnerId();
-                    projController.Initialize(
-                        target,
-                        unitBase.unitData.attackDamage,
-                        myOwnerId,
-                        unitBase.unitData.hasAOE,
-                        unitBase.unitData.aoeRadius
-                    );
+                    PerformAOEDamage(target.transform.position, damage, attackerId);
                 }
             }
         }
 
-        private void PerformAOEDamageLocal(Vector3 center)
+        private void PerformAttack(UnitBase target, float damage, int attackerId)
         {
-            Collider[] hits = Physics.OverlapSphere(center, unitBase.unitData.aoeRadius, enemyLayer);
-            int myOwnerId = GetMyOwnerId();
+            PlayAttackAnimation();
 
-            foreach (Collider hit in hits)
+            bool isRanged = unitBase != null && unitBase.unitData != null &&
+                           unitBase.unitData.attackType == AttackType.Ranged;
+
+            if (isRanged && projectilePrefab != null)
             {
-                LocalUnit enemy = hit.GetComponent<LocalUnit>();
-                if (enemy != null && enemy.OwnerId != myOwnerId)
+                SpawnProjectile(target.transform, damage, attackerId);
+            }
+            else
+            {
+                target.TakeDamage(damage, attackerId);
+
+                if (unitBase != null && unitBase.unitData != null && unitBase.unitData.hasAOE)
                 {
-                    enemy.TakeDamage(unitBase.unitData.attackDamage * 0.5f, myOwnerId);
+                    PerformAOEDamage(target.transform.position, damage, attackerId);
                 }
             }
         }
 
-        private void PerformAOEDamage(Vector3 center)
+        private void SpawnProjectile(Transform target, float damage, int attackerId)
         {
-            Collider[] hits = Physics.OverlapSphere(center, unitBase.unitData.aoeRadius, enemyLayer);
-            int myOwnerId = GetMyOwnerId();
+            Vector3 spawnPos = attackPoint != null ? attackPoint.position : transform.position + Vector3.up;
+            GameObject projectile = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
+
+            ProjectileController projController = projectile.GetComponent<ProjectileController>();
+            if (projController != null)
+            {
+                float aoeRadius = unitBase != null && unitBase.unitData != null ? unitBase.unitData.aoeRadius : 0f;
+                bool hasAOE = unitBase != null && unitBase.unitData != null && unitBase.unitData.hasAOE;
+
+                projController.Initialize(target, damage, attackerId, hasAOE, aoeRadius);
+            }
+        }
+
+        private void PerformAOEDamage(Vector3 center, float damage, int attackerId)
+        {
+            float aoeRadius = unitBase != null && unitBase.unitData != null ? unitBase.unitData.aoeRadius : 2f;
+
+            Collider[] hits = Physics.OverlapSphere(center, aoeRadius, enemyLayer);
 
             foreach (Collider hit in hits)
             {
+                UnitController enemyController = hit.GetComponent<UnitController>();
+                if (enemyController != null && enemyController.OwnerId != attackerId)
+                {
+                    enemyController.TakeDamage(damage * 0.5f, attackerId);
+                    continue;
+                }
+
                 UnitBase enemy = hit.GetComponent<UnitBase>();
-                if (enemy != null && GetUnitOwnerId(enemy) != myOwnerId)
+                if (enemy != null && enemy.OwnerId != attackerId)
                 {
-                    enemy.TakeDamage(unitBase.unitData.attackDamage * 0.5f, myOwnerId);
+                    enemy.TakeDamage(damage * 0.5f, attackerId);
                 }
             }
         }

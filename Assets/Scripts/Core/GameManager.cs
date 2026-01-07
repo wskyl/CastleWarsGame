@@ -1,56 +1,71 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-#if UNITY_NETCODE
-using Unity.Netcode;
-#endif
-
 namespace CastleWars.Core
 {
     /// <summary>
-    /// 游戏管理器 - 管理游戏状态和流程
-    /// 支持网络模式和本地模式
+    /// 游戏状态枚举
     /// </summary>
-#if UNITY_NETCODE
-    public class GameManager : NetworkBehaviour
-#else
+    public enum GameState
+    {
+        Waiting,
+        Playing,
+        Paused,
+        Ended
+    }
+
+    /// <summary>
+    /// 游戏结束原因
+    /// </summary>
+    public enum GameEndReason
+    {
+        CastleDestroyed,
+        TimeLimit,
+        Surrender
+    }
+
+    /// <summary>
+    /// 游戏管理器 - 管理游戏状态和流程（纯本地模式）
+    /// </summary>
     public class GameManager : MonoBehaviour
-#endif
     {
         public static GameManager Instance { get; private set; }
 
         [Header("游戏设置")]
         [SerializeField] private float gameDuration = 600f;
-        [SerializeField] private bool forceLocalMode = true;
 
-        [Header("玩家设置")]
+        [Header("生成点")]
         [SerializeField] private Transform player1SpawnPoint;
         [SerializeField] private Transform player2SpawnPoint;
-        [SerializeField] private GameObject playerPrefab;
 
-#if UNITY_NETCODE
-        // 网络模式的游戏状态
-        private NetworkVariable<GameState> networkState = new NetworkVariable<GameState>(GameState.Waiting);
-        private NetworkVariable<float> networkGameTime = new NetworkVariable<float>(0f);
-#endif
+        [Header("预制体")]
+        [SerializeField] private GameObject castlePrefab;
 
-        // 本地模式的游戏状态
-        private GameState localState = GameState.Waiting;
-        private float localGameTime = 0f;
+        [Header("AI设置")]
+        [SerializeField] private bool enableAI = true;
+
+        // 游戏状态
+        private GameState currentState = GameState.Waiting;
+        private float gameTime = 0f;
+
+        // 城堡
+        private CastleController player1Castle;
+        private CastleController player2Castle;
 
         // 玩家
-        private Dictionary<int, NetworkPlayer> players = new Dictionary<int, NetworkPlayer>();
+        private Dictionary<int, PlayerController> players = new Dictionary<int, PlayerController>();
 
-        // 判断是否为本地模式
-        public bool IsLocalMode => forceLocalMode || LocalGameMode.IsLocalMode || !IsNetworkActive();
+        // 事件
+        public System.Action<GameState> OnGameStateChanged;
+        public System.Action OnGameStarted;
+        public System.Action<GameEndReason, int> OnGameEnded;
 
-#if UNITY_NETCODE
-        public GameState CurrentState => IsLocalMode ? localState : networkState.Value;
-        public float GameTime => IsLocalMode ? localGameTime : networkGameTime.Value;
-#else
-        public GameState CurrentState => localState;
-        public float GameTime => localGameTime;
-#endif
+        // 公开属性
+        public GameState CurrentState => currentState;
+        public float GameTime => gameTime;
+        public float GameDuration => gameDuration;
+        public CastleController Player1Castle => player1Castle;
+        public CastleController Player2Castle => player2Castle;
 
         private void Awake()
         {
@@ -60,174 +75,99 @@ namespace CastleWars.Core
                 return;
             }
             Instance = this;
-            DontDestroyOnLoad(gameObject);
         }
 
         private void Start()
         {
-            if (IsLocalMode)
-            {
-                InitializeLocalMode();
-            }
-        }
-
-        /// <summary>
-        /// 检查网络是否激活
-        /// </summary>
-        private bool IsNetworkActive()
-        {
-#if UNITY_NETCODE
-            return NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
-#else
-            return false;
-#endif
-        }
-
-        /// <summary>
-        /// 初始化本地模式
-        /// </summary>
-        private void InitializeLocalMode()
-        {
-            Debug.Log("Initializing local game mode...");
-            LocalGameMode.EnableLocalMode();
-
-            if (LocalGameMode.Instance == null)
-            {
-                GameObject localModeObj = new GameObject("LocalGameMode");
-                localModeObj.AddComponent<LocalGameMode>();
-            }
-        }
-
-#if UNITY_NETCODE
-        public override void OnNetworkSpawn()
-        {
-            base.OnNetworkSpawn();
-
-            if (IsNetworkActive())
-            {
-                LocalGameMode.DisableLocalMode();
-            }
-
-            if (IsServer)
-            {
-                NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-                NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
-            }
-
-            networkState.OnValueChanged += OnGameStateChanged;
-        }
-
-        public override void OnNetworkDespawn()
-        {
-            base.OnNetworkDespawn();
-
-            if (IsServer && NetworkManager.Singleton != null)
-            {
-                NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-                NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
-            }
-
-            networkState.OnValueChanged -= OnGameStateChanged;
-        }
-
-        private void OnClientConnected(ulong clientId)
-        {
-            Debug.Log($"Client connected: {clientId}");
-
-            if (NetworkManager.Singleton.ConnectedClients.Count == 2 && networkState.Value == GameState.Waiting)
-            {
-                StartGame();
-            }
-        }
-
-        private void OnClientDisconnected(ulong clientId)
-        {
-            Debug.Log($"Client disconnected: {clientId}");
-
-            if (networkState.Value == GameState.Playing)
-            {
-                EndGame(GameEndReason.PlayerDisconnected);
-            }
-        }
-
-        [ServerRpc(RequireOwnership = false)]
-        public void StartGameServerRpc()
-        {
             StartGame();
         }
 
-        private void StartGame()
+        private void Update()
         {
-            if (!IsServer) return;
+            if (currentState != GameState.Playing) return;
 
-            networkState.Value = GameState.Playing;
-            networkGameTime.Value = 0f;
+            gameTime += Time.deltaTime;
 
+            if (gameTime >= gameDuration)
+            {
+                EndGame(GameEndReason.TimeLimit);
+            }
+        }
+
+        /// <summary>
+        /// 开始游戏
+        /// </summary>
+        public void StartGame()
+        {
+            Debug.Log("[GameManager] Starting game...");
+
+            gameTime = 0f;
+            SetGameState(GameState.Playing);
+
+            SpawnCastles();
             SpawnPlayers();
-            OnGameStartedClientRpc();
+
+            OnGameStarted?.Invoke();
+            Debug.Log("[GameManager] Game started!");
+        }
+
+        private void SpawnCastles()
+        {
+            Vector3 pos1 = player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-20, 0, 0);
+            Vector3 pos2 = player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(20, 0, 0);
+
+            player1Castle = CreateCastle(pos1, 1);
+            player2Castle = CreateCastle(pos2, 2);
+        }
+
+        private CastleController CreateCastle(Vector3 position, int ownerId)
+        {
+            GameObject castleObj;
+
+            if (castlePrefab != null)
+            {
+                castleObj = Instantiate(castlePrefab, position, Quaternion.identity);
+            }
+            else
+            {
+                castleObj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                castleObj.transform.position = position;
+                castleObj.transform.localScale = new Vector3(5, 10, 5);
+
+                BoxCollider col = castleObj.GetComponent<BoxCollider>();
+                col.isTrigger = true;
+
+                Renderer rend = castleObj.GetComponent<Renderer>();
+                rend.material.color = ownerId == 1 ? new Color(0.2f, 0.4f, 0.8f) : new Color(0.8f, 0.2f, 0.2f);
+            }
+
+            castleObj.name = $"Castle_P{ownerId}";
+            castleObj.tag = "Castle";
+
+            CastleController controller = castleObj.GetComponent<CastleController>();
+            if (controller == null)
+            {
+                controller = castleObj.AddComponent<CastleController>();
+            }
+            controller.Initialize(ownerId);
+
+            return controller;
         }
 
         private void SpawnPlayers()
         {
-            int playerIndex = 1;
-            foreach (var client in NetworkManager.Singleton.ConnectedClients)
-            {
-                Vector3 spawnPos = playerIndex == 1 ? player1SpawnPoint.position : player2SpawnPoint.position;
-
-                GameObject playerObj = Instantiate(playerPrefab, spawnPos, Quaternion.identity);
-                NetworkObject netObj = playerObj.GetComponent<NetworkObject>();
-
-                if (netObj != null)
-                {
-                    netObj.SpawnAsPlayerObject(client.Key);
-                }
-
-                NetworkPlayer networkPlayer = playerObj.GetComponent<NetworkPlayer>();
-                if (networkPlayer != null)
-                {
-                    networkPlayer.playerId.Value = playerIndex;
-                    players[playerIndex] = networkPlayer;
-                }
-
-                playerIndex++;
-            }
+            CreatePlayer(1, false);
+            CreatePlayer(2, enableAI);
         }
 
-        [ClientRpc]
-        private void OnGameStartedClientRpc()
+        private void CreatePlayer(int playerId, bool isAI)
         {
-            Debug.Log("Game Started!");
-        }
+            GameObject playerObj = new GameObject($"Player_{playerId}");
+            PlayerController controller = playerObj.AddComponent<PlayerController>();
+            controller.Initialize(playerId, isAI);
+            players[playerId] = controller;
 
-        [ClientRpc]
-        private void OnGameEndedClientRpc(GameEndReason reason, int winnerId)
-        {
-            Debug.Log($"Game Ended! Winner: Player {winnerId}, Reason: {reason}");
-        }
-
-        private void OnGameStateChanged(GameState oldState, GameState newState)
-        {
-            Debug.Log($"Game state changed: {oldState} -> {newState}");
-        }
-#endif
-
-        private void Update()
-        {
-            if (IsLocalMode) return;
-
-#if UNITY_NETCODE
-            if (!IsServer) return;
-
-            if (networkState.Value == GameState.Playing)
-            {
-                networkGameTime.Value += Time.deltaTime;
-
-                if (networkGameTime.Value >= gameDuration)
-                {
-                    EndGame(GameEndReason.TimeLimit);
-                }
-            }
-#endif
+            Debug.Log($"[GameManager] Created Player {playerId}, AI: {isAI}");
         }
 
         /// <summary>
@@ -235,31 +175,26 @@ namespace CastleWars.Core
         /// </summary>
         public void EndGame(GameEndReason reason, int winnerId = 0)
         {
-            if (IsLocalMode)
-            {
-                if (LocalGameMode.Instance != null)
-                {
-                    LocalGameMode.Instance.EndGame(reason, winnerId);
-                }
-                return;
-            }
+            if (currentState == GameState.Ended) return;
 
-#if UNITY_NETCODE
-            if (!IsServer) return;
-
-            networkState.Value = GameState.Ended;
-
-            if (reason == GameEndReason.TimeLimit)
+            if (reason == GameEndReason.TimeLimit && winnerId == 0)
             {
                 winnerId = DetermineWinnerByHealth();
             }
 
-            OnGameEndedClientRpc(reason, winnerId);
-#endif
+            SetGameState(GameState.Ended);
+            OnGameEnded?.Invoke(reason, winnerId);
+
+            string winnerName = winnerId == 1 ? "Player 1" : "Player 2 (AI)";
+            Debug.Log($"[GameManager] Game Over! {winnerName} wins! Reason: {reason}");
         }
 
         private int DetermineWinnerByHealth()
         {
+            if (player1Castle != null && player2Castle != null)
+            {
+                return player1Castle.CurrentHealth >= player2Castle.CurrentHealth ? 1 : 2;
+            }
             return 1;
         }
 
@@ -268,37 +203,64 @@ namespace CastleWars.Core
         /// </summary>
         public void OnCastleDestroyed(int ownerId)
         {
-            if (IsLocalMode)
-            {
-                if (LocalGameMode.Instance != null)
-                {
-                    LocalGameMode.Instance.OnCastleDestroyed(ownerId);
-                }
-                return;
-            }
-
-#if UNITY_NETCODE
-            if (!IsServer) return;
-
             int winnerId = ownerId == 1 ? 2 : 1;
             EndGame(GameEndReason.CastleDestroyed, winnerId);
-#endif
         }
-    }
 
-    public enum GameState
-    {
-        Waiting,
-        Playing,
-        Paused,
-        Ended
-    }
+        private void SetGameState(GameState newState)
+        {
+            GameState oldState = currentState;
+            currentState = newState;
+            OnGameStateChanged?.Invoke(newState);
+            Debug.Log($"[GameManager] State: {oldState} -> {newState}");
+        }
 
-    public enum GameEndReason
-    {
-        CastleDestroyed,
-        TimeLimit,
-        PlayerDisconnected,
-        Surrender
+        /// <summary>
+        /// 获取玩家控制器
+        /// </summary>
+        public PlayerController GetPlayer(int playerId)
+        {
+            return players.TryGetValue(playerId, out PlayerController p) ? p : null;
+        }
+
+        /// <summary>
+        /// 获取敌方城堡
+        /// </summary>
+        public CastleController GetEnemyCastle(int playerId)
+        {
+            return playerId == 1 ? player2Castle : player1Castle;
+        }
+
+        /// <summary>
+        /// 获取己方城堡
+        /// </summary>
+        public CastleController GetOwnCastle(int playerId)
+        {
+            return playerId == 1 ? player1Castle : player2Castle;
+        }
+
+        /// <summary>
+        /// 重启游戏
+        /// </summary>
+        public void RestartGame()
+        {
+            // 清理玩家
+            foreach (var p in players.Values)
+            {
+                if (p != null) Destroy(p.gameObject);
+            }
+            players.Clear();
+
+            // 清理城堡
+            if (player1Castle != null) Destroy(player1Castle.gameObject);
+            if (player2Castle != null) Destroy(player2Castle.gameObject);
+
+            // 清理单位
+            var units = FindObjectsOfType<UnitController>();
+            foreach (var u in units) Destroy(u.gameObject);
+
+            Debug.Log("[GameManager] Game restarted!");
+            StartGame();
+        }
     }
 }
