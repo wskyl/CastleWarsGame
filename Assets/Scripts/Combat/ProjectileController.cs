@@ -1,10 +1,12 @@
 using UnityEngine;
 using CastleWars.Units;
+using CastleWars.Core;
 
 namespace CastleWars.Combat
 {
     /// <summary>
     /// 投射物控制器 - 处理远程攻击的子弹/箭矢
+    /// 支持本地模式和网络模式
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class ProjectileController : MonoBehaviour
@@ -40,7 +42,6 @@ namespace CastleWars.Combat
             this.aoeRadius = aoeRadius;
             this.isInitialized = true;
 
-            // 设置初始方向
             if (target != null)
             {
                 Vector3 direction = (target.position - transform.position).normalized;
@@ -48,7 +49,6 @@ namespace CastleWars.Combat
                 transform.rotation = Quaternion.LookRotation(direction);
             }
 
-            // 自动销毁
             Destroy(gameObject, lifetime);
         }
 
@@ -56,7 +56,6 @@ namespace CastleWars.Combat
         {
             if (!isInitialized) return;
 
-            // 追踪目标（导弹效果）
             if (target != null)
             {
                 Vector3 direction = (target.position - transform.position).normalized;
@@ -67,30 +66,72 @@ namespace CastleWars.Combat
 
         private void OnTriggerEnter(Collider other)
         {
-            // 检查是否击中单位
+            // 本地模式：检查LocalUnit
+            if (LocalGameMode.IsLocalMode)
+            {
+                LocalUnit localUnit = other.GetComponent<LocalUnit>();
+                if (localUnit != null)
+                {
+                    if (localUnit.OwnerId == attackerId)
+                    {
+                        return;
+                    }
+
+                    localUnit.TakeDamage(damage, attackerId);
+
+                    if (hasAOE)
+                    {
+                        PerformAOEDamageLocal(transform.position);
+                    }
+
+                    SpawnHitEffect();
+                    Destroy(gameObject);
+                    return;
+                }
+            }
+
+            // 网络模式或通用模式：检查UnitBase
             UnitBase unit = other.GetComponent<UnitBase>();
             if (unit != null)
             {
-                // 确保不会击中友军
-                if (unit.ownerId.Value == attackerId)
+                int unitOwnerId = GetUnitOwnerId(unit);
+                if (unitOwnerId == attackerId)
                 {
                     return;
                 }
 
-                // 造成伤害
-                unit.TakeDamageServerRpc(damage, attackerId);
+                unit.TakeDamage(damage, attackerId);
 
-                // AOE伤害
                 if (hasAOE)
                 {
                     PerformAOEDamage(transform.position);
                 }
 
-                // 播放击中效果
                 SpawnHitEffect();
-
-                // 销毁投射物
                 Destroy(gameObject);
+            }
+        }
+
+        private int GetUnitOwnerId(UnitBase unit)
+        {
+#if UNITY_NETCODE
+            return unit.ownerId.Value;
+#else
+            return unit.OwnerIdValue;
+#endif
+        }
+
+        private void PerformAOEDamageLocal(Vector3 center)
+        {
+            Collider[] hits = Physics.OverlapSphere(center, aoeRadius);
+
+            foreach (Collider hit in hits)
+            {
+                LocalUnit enemy = hit.GetComponent<LocalUnit>();
+                if (enemy != null && enemy.OwnerId != attackerId)
+                {
+                    enemy.TakeDamage(damage * 0.5f, attackerId);
+                }
             }
         }
 
@@ -101,10 +142,9 @@ namespace CastleWars.Combat
             foreach (Collider hit in hits)
             {
                 UnitBase enemy = hit.GetComponent<UnitBase>();
-                if (enemy != null && enemy.ownerId.Value != attackerId)
+                if (enemy != null && GetUnitOwnerId(enemy) != attackerId)
                 {
-                    // AOE伤害是主伤害的50%
-                    enemy.TakeDamageServerRpc(damage * 0.5f, attackerId);
+                    enemy.TakeDamage(damage * 0.5f, attackerId);
                 }
             }
         }

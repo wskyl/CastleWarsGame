@@ -17,17 +17,23 @@ namespace CastleWars.Units
         {
             unitBase = GetComponent<UnitBase>();
             rb = GetComponent<Rigidbody>();
+        }
 
+        private void Start()
+        {
             // 配置刚体
-            if (unitBase.unitData.canFly)
+            if (unitBase != null && unitBase.unitData != null)
             {
-                rb.useGravity = false;
-                rb.constraints = RigidbodyConstraints.FreezeRotation;
-            }
-            else
-            {
-                rb.constraints = RigidbodyConstraints.FreezeRotationX |
-                                RigidbodyConstraints.FreezeRotationZ;
+                if (unitBase.unitData.canFly)
+                {
+                    rb.useGravity = false;
+                    rb.constraints = RigidbodyConstraints.FreezeRotation;
+                }
+                else
+                {
+                    rb.constraints = RigidbodyConstraints.FreezeRotationX |
+                                    RigidbodyConstraints.FreezeRotationZ;
+                }
             }
         }
 
@@ -36,13 +42,14 @@ namespace CastleWars.Units
         /// </summary>
         public void MoveInDirection(float directionX)
         {
-            if (isStopped || unitBase.IsDead) return;
+            if (isStopped) return;
+            if (unitBase == null || unitBase.IsDead) return;
+            if (unitBase.unitData == null) return;
 
             Vector3 moveDirection = new Vector3(directionX, 0, 0).normalized;
 
             if (unitBase.unitData.canFly)
             {
-                // 空中单位保持一定高度
                 float targetHeight = 5f;
                 float currentHeight = transform.position.y;
 
@@ -55,7 +62,6 @@ namespace CastleWars.Units
             Vector3 velocity = moveDirection * unitBase.unitData.moveSpeed;
             rb.velocity = velocity;
 
-            // 转向
             if (directionX != 0)
             {
                 transform.rotation = Quaternion.LookRotation(new Vector3(directionX, 0, 0));
@@ -68,7 +74,10 @@ namespace CastleWars.Units
         public void Stop()
         {
             isStopped = true;
-            rb.velocity = Vector3.zero;
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+            }
         }
 
         /// <summary>
