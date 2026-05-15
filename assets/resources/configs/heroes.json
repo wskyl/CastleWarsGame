@@ -1,0 +1,73 @@
+[
+  {
+    "id": "guardian_general",
+    "name": "GuardianGeneral",
+    "displayName": "守护将军",
+    "hp": 800,
+    "atk": 60,
+    "attackSpeed": 0.8,
+    "moveSpeed": 3,
+    "attackRange": 1,
+    "armorType": "heavy",
+    "damageType": "physical",
+    "unitType": "ground",
+    "gloryRequired": 100,
+    "reviveTime": 60,
+    "skill": {
+      "type": "shield_aura",
+      "cooldown": 30,
+      "range": 5,
+      "duration": 5,
+      "description": "护盾：为附近友军提供5秒免伤护盾"
+    },
+    "description": "近战坦克型英雄，拥有极高的生存能力与友军保护技能"
+  },
+  {
+    "id": "elemental_archmage",
+    "name": "ElementalArchmage",
+    "displayName": "元素法师",
+    "hp": 400,
+    "atk": 50,
+    "attackSpeed": 0.6,
+    "moveSpeed": 2.5,
+    "attackRange": 10,
+    "armorType": "none",
+    "damageType": "magic",
+    "unitType": "ground",
+    "gloryRequired": 100,
+    "reviveTime": 60,
+    "skill": {
+      "type": "meteor",
+      "cooldown": 25,
+      "range": 15,
+      "damage": 300,
+      "aoeRadius": 5,
+      "description": "陨石术：对目标区域造成大范围魔法AOE伤害"
+    },
+    "description": "远程法术型英雄，AOE陨石术可一次清空大量敌军"
+  },
+  {
+    "id": "shadow_hunter",
+    "name": "ShadowHunter",
+    "displayName": "暗影猎手",
+    "hp": 500,
+    "atk": 80,
+    "attackSpeed": 1.5,
+    "moveSpeed": 5,
+    "attackRange": 1,
+    "armorType": "light",
+    "damageType": "physical",
+    "unitType": "ground",
+    "gloryRequired": 100,
+    "reviveTime": 60,
+    "skill": {
+      "type": "mark",
+      "cooldown": 20,
+      "range": 12,
+      "duration": 8,
+      "multiplier": 1.5,
+      "description": "标记：使目标单位受到的所有伤害提升50%，持续8秒"
+    },
+    "description": "刺杀型英雄，高爆发输出与标记技能可快速击杀敌方高价值目标"
+  }
+]
