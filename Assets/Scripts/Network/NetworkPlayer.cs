@@ -144,16 +144,18 @@ namespace CastleWars.Core
 
         private void SetupLocalCamera()
         {
-            // 根据玩家ID设置相机位置
+            // 与 SceneInitializer 保持一致：透视投影 + 约 60° 俯斜角 RTS 视角
+            // 联机模式下两位玩家共享同一相机参数，均使用居中的 3/4 俯视角度
             Camera mainCamera = Camera.main;
             if (mainCamera != null)
             {
-                Vector3 cameraPos = _playerId.Value == 1
-                    ? new Vector3(-10, 10, -10)
-                    : new Vector3(10, 10, 10);
+                mainCamera.orthographic = false;
+                mainCamera.fieldOfView = 55f;
+                mainCamera.nearClipPlane = 0.3f;
+                mainCamera.farClipPlane = 200f;
 
-                mainCamera.transform.position = cameraPos;
-                mainCamera.transform.LookAt(Vector3.zero);
+                mainCamera.transform.position = new Vector3(0, 17, -10);
+                mainCamera.transform.rotation = Quaternion.Euler(60, 0, 0);
             }
         }
 

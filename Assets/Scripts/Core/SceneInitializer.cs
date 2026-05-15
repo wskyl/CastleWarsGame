@@ -30,14 +30,29 @@ namespace CastleWars.Core
         {
             Debug.Log("[SceneInitializer] AutoInitialize triggered - building game scene from code...");
 
-            CreateDefaultDataAssets();
-            CreateCamera();
-            CreateLighting();
-            CreateGround();
-            CreateGameLauncher();
-            CreateLocalGameUI();
-            CreateQualitySettingsManager();
-            CreateTouchInputHandler();
+            try { CreateDefaultDataAssets(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateDefaultDataAssets failed: {e}"); }
+
+            try { CreateCamera(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateCamera failed: {e}"); }
+
+            try { CreateLighting(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateLighting failed: {e}"); }
+
+            try { CreateGround(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateGround failed: {e}"); }
+
+            try { CreateGameLauncher(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateGameLauncher failed: {e}"); }
+
+            try { CreateLocalGameUI(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateLocalGameUI failed: {e}"); }
+
+            try { CreateQualitySettingsManager(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateQualitySettingsManager failed: {e}"); }
+
+            try { CreateTouchInputHandler(); }
+            catch (System.Exception e) { Debug.LogError($"[SceneInitializer] CreateTouchInputHandler failed: {e}"); }
 
             Debug.Log("[SceneInitializer] Game scene built successfully!");
         }
@@ -160,17 +175,21 @@ namespace CastleWars.Core
             cameraObj.tag = "MainCamera";
 
             Camera cam = cameraObj.AddComponent<Camera>();
-            cam.orthographic = true;
-            cam.orthographicSize = 15f;
+            // 透视投影，呈现经典 RTS 3/4 俯视风格
+            cam.orthographic = false;
+            cam.fieldOfView = 55f;
+            cam.nearClipPlane = 0.3f;
+            cam.farClipPlane = 200f;
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(0.4f, 0.6f, 0.8f, 1f);
 
-            cameraObj.transform.position = new Vector3(0, 20, 0);
-            cameraObj.transform.rotation = Quaternion.Euler(90, 0, 0);
+            // 约 60° 俯斜角，RTS 3/4 视角
+            cameraObj.transform.position = new Vector3(0, 17, -10);
+            cameraObj.transform.rotation = Quaternion.Euler(60, 0, 0);
 
             cameraObj.AddComponent<AudioListener>();
 
-            Debug.Log("[SceneInitializer] Camera created");
+            Debug.Log("[SceneInitializer] Camera created (perspective, 60° tilt RTS view)");
         }
 
         private static void CreateLighting()
@@ -474,6 +493,8 @@ namespace CastleWars.Core
 
             GameObject qsmObj = new GameObject("QualitySettingsManager");
             qsmObj.AddComponent<QualitySettingsManager>();
+
+            Debug.Log("[SceneInitializer] QualitySettingsManager created");
         }
 
         private static void CreateTouchInputHandler()
@@ -482,6 +503,8 @@ namespace CastleWars.Core
 
             GameObject touchObj = new GameObject("TouchInputHandler");
             touchObj.AddComponent<TouchInputHandler>();
+
+            Debug.Log("[SceneInitializer] TouchInputHandler created");
         }
 
         #endregion
