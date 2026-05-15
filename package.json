@@ -1,19 +1,29 @@
 {
   "name": "castle-wars-game",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "displayName": "Castle Wars",
-  "description": "基于魔兽争霸DLC《城堡战争》的2.5D多人对战手游",
-  "unity": "2021.3",
-  "dependencies": {
-    "com.unity.netcode.gameobjects": "1.7.0",
-    "com.unity.render-pipelines.universal": "12.1.13",
-    "com.unity.textmeshpro": "3.0.6",
-    "com.unity.ugui": "1.0.0"
-  },
+  "description": "城堡战争 —— 基于 Cocos Creator 3.x TypeScript 重写，2.5D策略塔防对战单机游戏（含AI对手）",
+  "engine": "cocos-creator",
+  "engineVersion": "3.8.5",
+  "language": "TypeScript",
+  "platforms": ["web-mobile", "wechatgame"],
   "keywords": [
     "castle wars",
-    "multiplayer",
+    "cocos creator",
     "strategy",
-    "mobile game"
-  ]
+    "tower defense",
+    "2.5d",
+    "single player",
+    "ai opponent",
+    "typescript",
+    "mobile game",
+    "wechat mini game"
+  ],
+  "scripts": {
+    "build": "cocos build",
+    "preview": "cocos preview"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.0"
+  }
 }

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",
+    "module": "commonjs",
+    "lib": ["es2015", "dom"],
+    "strict": false,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "outDir": "temp/scripts",
+    "noImplicitAny": false,
+    "noImplicitReturns": false
+  },
+  "include": [
+    "assets/scripts/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "temp",
+    "Library",
+    "Packages"
+  ]
+}
