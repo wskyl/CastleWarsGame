@@ -145,11 +145,13 @@ namespace CastleWars.Core
 
         private void SpawnCastles()
         {
-            // 创建玩家1城堡
-            CreateLocalCastle(1, new Vector3(-20, 0, 0));
+            // 创建玩家1城堡 - 优先使用SpawnPoint
+            Vector3 p1CastlePos = player1SpawnPoint != null ? player1SpawnPoint.position : new Vector3(-20, 0, 0);
+            CreateLocalCastle(1, p1CastlePos);
 
-            // 创建玩家2城堡
-            CreateLocalCastle(2, new Vector3(20, 0, 0));
+            // 创建玩家2城堡 - 优先使用SpawnPoint
+            Vector3 p2CastlePos = player2SpawnPoint != null ? player2SpawnPoint.position : new Vector3(20, 0, 0);
+            CreateLocalCastle(2, p2CastlePos);
         }
 
         private void CreateLocalCastle(int ownerId, Vector3 position)
@@ -249,7 +251,14 @@ namespace CastleWars.Core
         /// </summary>
         public void RestartGame()
         {
-            // 清理现有对象
+            // 清理所有残留单位
+            LocalUnit[] allUnits = FindObjectsOfType<LocalUnit>();
+            foreach (var unit in allUnits)
+            {
+                if (unit != null) Destroy(unit.gameObject);
+            }
+
+            // 清理现有玩家和城堡对象
             foreach (var player in players.Values)
             {
                 if (player != null) Destroy(player.gameObject);

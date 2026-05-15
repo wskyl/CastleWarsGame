@@ -40,7 +40,7 @@ namespace CastleWars.UI
         [SerializeField] private Color goldDecreaseColor = Color.red;
 
         // 组件引用
-        private PlayerEconomy _economy;
+        private IEconomyProvider _economy;
 
         // 动画状态
         private int _displayedGold;
@@ -65,7 +65,14 @@ namespace CastleWars.UI
         /// </summary>
         private void FindPlayerEconomy()
         {
-            // 查找本地玩家
+            // 优先检查本地模式
+            if (CastleWars.Core.LocalGameMode.IsLocalMode)
+            {
+                FindLocalPlayerEconomy();
+                return;
+            }
+
+            // 网络模式：查找NetworkPlayer
             NetworkPlayer[] players = FindObjectsOfType<NetworkPlayer>();
             foreach (var player in players)
             {
@@ -77,6 +84,39 @@ namespace CastleWars.UI
             }
 
             // 订阅事件
+            SubscribeToEconomyEvents();
+        }
+
+        /// <summary>
+        /// 在本地模式下查找玩家经济组件
+        /// </summary>
+        private void FindLocalPlayerEconomy()
+        {
+            CastleWars.Core.LocalPlayer localPlayer = null;
+
+            if (CastleWars.Core.LocalGameMode.Instance != null)
+            {
+                localPlayer = CastleWars.Core.LocalGameMode.Instance.GetPlayer(1);
+            }
+
+            if (localPlayer != null)
+            {
+                _economy = localPlayer.GetComponent<LocalPlayerEconomyAdapter>();
+                if (_economy == null)
+                {
+                    _economy = localPlayer.gameObject.AddComponent<LocalPlayerEconomyAdapter>();
+                    ((LocalPlayerEconomyAdapter)_economy).Initialize(localPlayer);
+                }
+            }
+
+            SubscribeToEconomyEvents();
+        }
+
+        /// <summary>
+        /// 订阅经济系统事件
+        /// </summary>
+        private void SubscribeToEconomyEvents()
+        {
             if (_economy != null)
             {
                 _economy.OnGoldChanged += OnGoldChanged;
@@ -93,7 +133,7 @@ namespace CastleWars.UI
         /// <summary>
         /// 设置经济组件引用
         /// </summary>
-        public void SetEconomy(PlayerEconomy economy)
+        public void SetEconomy(IEconomyProvider economy)
         {
             // 取消旧订阅
             if (_economy != null)

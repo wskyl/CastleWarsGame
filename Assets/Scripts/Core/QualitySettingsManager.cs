@@ -69,8 +69,9 @@ namespace CastleWars.Core
             // 抗锯齿
             QualitySettings.antiAliasing = 0;
 
-            // LOD
-            QualitySettings.maximumLODLevel = 2;
+            // LOD - 设为0以显示所有LOD级别，让LOD系统自动选择
+            // 之前的maximumLODLevel=2会跳过LOD 0和1，导致没有多级LOD的模型不渲染
+            QualitySettings.maximumLODLevel = 0;
             QualitySettings.lodBias = 0.5f;
 
             Debug.Log("Applied Low Quality Settings - Target: 30 FPS");
@@ -91,8 +92,8 @@ namespace CastleWars.Core
             // 抗锯齿
             QualitySettings.antiAliasing = 2;
 
-            // LOD
-            QualitySettings.maximumLODLevel = 1;
+            // LOD - 设为0以显示所有LOD级别
+            QualitySettings.maximumLODLevel = 0;
             QualitySettings.lodBias = 1.0f;
 
             Debug.Log("Applied Medium Quality Settings - Target: 45 FPS");

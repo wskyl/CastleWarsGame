@@ -92,6 +92,7 @@ namespace CastleWars.Core
                 return;
             }
             Instance = this;
+            DontDestroyOnLoad(gameObject);
         }
 
         public override void OnNetworkSpawn()

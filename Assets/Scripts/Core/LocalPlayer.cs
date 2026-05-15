@@ -151,17 +151,24 @@ namespace CastleWars.Core
 
         private void TryTrainUnit()
         {
-            // 简化的训练逻辑 - 实际项目中需要与单位生成系统集成
+            // 实际生成单位
             if (SpendGold(100))
             {
-                Debug.Log($"AI Player {PlayerId} trained a unit");
-                // TODO: 实际生成单位
+                if (CastleWars.Core.LocalUnitSpawner.Instance != null)
+                {
+                    CastleWars.Core.LocalUnitSpawner.Instance.SpawnUnit(PlayerId);
+                    Debug.Log($"AI Player {PlayerId} trained a unit");
+                }
+                else
+                {
+                    Debug.LogWarning($"AI Player {PlayerId}: LocalUnitSpawner not found, cannot spawn unit");
+                }
             }
         }
 
         private void TryBuildBuilding()
         {
-            // 简化的建造逻辑 - 实际项目中需要与建筑系统集成
+            // 简化的建造逻辑 - 增加收入
             if (SpendGold(300))
             {
                 Debug.Log($"AI Player {PlayerId} built a building");

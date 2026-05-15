@@ -64,6 +64,9 @@ namespace CastleWars.Units
         // 光环加成
         private float _attackBonus = 0f;
 
+        // 对象池引用（用于回收而非销毁）
+        private CastleWars.Buildings.UnitPool _pool;
+
         // 事件
         public event Action<float, float> OnHealthChanged; // current, max
         public event Action<UnitState> OnStateChanged;
@@ -121,6 +124,14 @@ namespace CastleWars.Units
 
             _currentHealth.OnValueChanged -= HandleHealthChanged;
             _currentState.OnValueChanged -= HandleStateChanged;
+        }
+
+        /// <summary>
+        /// 设置对象池引用（用于回收而非销毁）
+        /// </summary>
+        public void SetPool(CastleWars.Buildings.UnitPool pool)
+        {
+            _pool = pool;
         }
 
         /// <summary>
@@ -377,7 +388,15 @@ namespace CastleWars.Units
 
         private void DespawnUnit()
         {
-            if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
+            // 优先归还到对象池，而非销毁
+            if (_pool != null)
+            {
+                // 重置单位状态
+                _currentTarget = null;
+                _attackBonus = 0f;
+                _pool.Return(gameObject);
+            }
+            else if (IsServer && NetworkObject != null && NetworkObject.IsSpawned)
             {
                 NetworkObject.Despawn();
             }

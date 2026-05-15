@@ -38,7 +38,8 @@ namespace CastleWars.UI
 
         // 组件引用
         private BuildingManager _buildingManager;
-        private PlayerEconomy _economy;
+        private LocalBuildingManagerAdapter _localBuildingManager;
+        private IEconomyProvider _economy;
 
         // 按钮列表
         private List<BuildingButton> _buildingButtons = new List<BuildingButton>();
@@ -85,7 +86,14 @@ namespace CastleWars.UI
         /// </summary>
         private void FindPlayerComponents()
         {
-            // 查找本地玩家
+            // 优先检查本地模式
+            if (CastleWars.Core.LocalGameMode.IsLocalMode)
+            {
+                FindLocalPlayerComponents();
+                return;
+            }
+
+            // 网络模式：查找NetworkPlayer
             NetworkPlayer[] players = FindObjectsOfType<NetworkPlayer>();
             foreach (var player in players)
             {
@@ -94,6 +102,38 @@ namespace CastleWars.UI
                     _buildingManager = player.GetBuildingManager();
                     _economy = player.GetEconomy();
                     break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 在本地模式下查找玩家组件
+        /// </summary>
+        private void FindLocalPlayerComponents()
+        {
+            CastleWars.Core.LocalPlayer localPlayer = null;
+
+            if (CastleWars.Core.LocalGameMode.Instance != null)
+            {
+                localPlayer = CastleWars.Core.LocalGameMode.Instance.GetPlayer(1);
+            }
+
+            if (localPlayer != null)
+            {
+                // 本地模式下使用LocalPlayer适配器
+                _economy = localPlayer.GetComponent<LocalPlayerEconomyAdapter>();
+                if (_economy == null)
+                {
+                    _economy = localPlayer.gameObject.AddComponent<LocalPlayerEconomyAdapter>();
+                    ((LocalPlayerEconomyAdapter)_economy).Initialize(localPlayer);
+                }
+
+                // 本地模式下使用LocalBuildingManagerAdapter
+                _localBuildingManager = localPlayer.GetComponent<LocalBuildingManagerAdapter>();
+                if (_localBuildingManager == null)
+                {
+                    _localBuildingManager = localPlayer.gameObject.AddComponent<LocalBuildingManagerAdapter>();
+                    _localBuildingManager.Initialize(localPlayer);
                 }
             }
         }
@@ -244,8 +284,12 @@ namespace CastleWars.UI
         {
             if (_selectedSlot < 0) return;
 
-            // 尝试建造
-            if (_buildingManager != null)
+            // 尝试建造 - 支持网络模式和本地模式
+            if (_localBuildingManager != null)
+            {
+                _localBuildingManager.TryBuildBuilding(buildingData, _selectedSlot);
+            }
+            else if (_buildingManager != null)
             {
                 _buildingManager.TryBuildBuilding(buildingData, _selectedSlot);
             }
@@ -268,9 +312,14 @@ namespace CastleWars.UI
                 // 检查金币
                 bool canAfford = currentGold >= button.BuildingData.goldCost;
 
-                // 检查前置条件
+                // 检查前置条件 - 支持网络模式和本地模式
                 bool hasPrerequisites = true;
-                if (_buildingManager != null)
+                if (_localBuildingManager != null)
+                {
+                    var missing = _localBuildingManager.GetMissingPrerequisites(button.BuildingData);
+                    hasPrerequisites = missing.Count == 0;
+                }
+                else if (_buildingManager != null)
                 {
                     var missing = _buildingManager.GetMissingPrerequisites(button.BuildingData);
                     hasPrerequisites = missing.Count == 0;

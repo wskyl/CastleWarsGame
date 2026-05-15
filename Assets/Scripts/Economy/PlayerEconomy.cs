@@ -8,7 +8,7 @@ namespace CastleWars.Economy
     /// 玩家经济系统
     /// 管理金币、收入、资源获取
     /// </summary>
-    public class PlayerEconomy : NetworkBehaviour
+    public class PlayerEconomy : NetworkBehaviour, IEconomyProvider
     {
         [Header("初始资源")]
         [Tooltip("初始金币")]

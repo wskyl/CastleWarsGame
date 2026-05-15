@@ -171,6 +171,11 @@ namespace CastleWars.Buildings
             if (unit != null)
             {
                 unit.Initialize(_ownerId.Value, buildingData.producedUnit);
+                // 设置对象池引用以便回收
+                if (_unitPool != null)
+                {
+                    unit.SetPool(_unitPool);
+                }
             }
 
             // 生成网络对象

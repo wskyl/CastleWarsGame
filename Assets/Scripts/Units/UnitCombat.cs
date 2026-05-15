@@ -323,17 +323,6 @@ namespace CastleWars.Units
         #region 工具方法
 
         /// <summary>
-        /// 检查目标是否在攻击范围内
-        /// </summary>
-        public bool IsInAttackRange(Transform target)
-        {
-            if (target == null || _unitBase?.unitData == null) return false;
-
-            float distance = Vector3.Distance(transform.position, target.position);
-            return distance <= _unitBase.unitData.attackRange;
-        }
-
-        /// <summary>
         /// 获取到目标的距离
         /// </summary>
         public float GetDistanceToTarget(Transform target)
