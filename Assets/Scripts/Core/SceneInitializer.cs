@@ -534,10 +534,10 @@ namespace CastleWars.Core
             bgRect.offsetMin = Vector2.zero;
             bgRect.offsetMax = Vector2.zero;
 
-            // Fill Area
+            // Fill Area（必须主动 AddComponent，plain GameObject 不会自动挂 RectTransform）
             GameObject fillAreaObj = new GameObject("Fill Area");
             fillAreaObj.transform.SetParent(sliderObj.transform, false);
-            RectTransform fillAreaRect = fillAreaObj.GetComponent<RectTransform>();
+            RectTransform fillAreaRect = fillAreaObj.AddComponent<RectTransform>();
             fillAreaRect.anchorMin = Vector2.zero;
             fillAreaRect.anchorMax = Vector2.one;
             fillAreaRect.offsetMin = Vector2.zero;
