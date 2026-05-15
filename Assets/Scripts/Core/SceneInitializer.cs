@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.UI;
-using CastleWars.Core;
 using CastleWars.Data;
 using CastleWars.UI;
 
@@ -8,37 +7,28 @@ namespace CastleWars.Core
 {
     /// <summary>
     /// 场景初始化器 - 通过代码创建完整的游戏场景
-    /// 当项目中没有预制体和场景资源时，此脚本负责动态构建所有必要的游戏对象
+    /// 使用[RuntimeInitializeOnLoadMethod]在游戏加载前自动执行，无需挂载到场景中的GameObject
     /// </summary>
-    public class SceneInitializer : MonoBehaviour
+    public class SceneInitializer
     {
-        [Header("场景设置")]
-        [SerializeField] private bool autoInitialize = true;
-
         // 默认单位数据
-        private UnitData warriorData;
-        private UnitData archerData;
-        private UnitData cavalryData;
+        private static UnitData warriorData;
+        private static UnitData archerData;
+        private static UnitData cavalryData;
 
         // 默认建筑数据
-        private BuildingData barracksData;
-        private BuildingData archerRangeData;
-        private BuildingData stableData;
-
-        private void Start()
-        {
-            if (autoInitialize)
-            {
-                InitializeScene();
-            }
-        }
+        private static BuildingData barracksData;
+        private static BuildingData archerRangeData;
+        private static BuildingData stableData;
 
         /// <summary>
-        /// 初始化完整游戏场景
+        /// Unity运行时自动引导入口
+        /// 在场景加载之前执行，创建初始GameObject并启动整个游戏
         /// </summary>
-        public void InitializeScene()
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void AutoInitialize()
         {
-            Debug.Log("[SceneInitializer] Starting scene initialization...");
+            Debug.Log("[SceneInitializer] AutoInitialize triggered - building game scene from code...");
 
             CreateDefaultDataAssets();
             CreateCamera();
@@ -49,15 +39,12 @@ namespace CastleWars.Core
             CreateQualitySettingsManager();
             CreateTouchInputHandler();
 
-            Debug.Log("[SceneInitializer] Scene initialization complete!");
+            Debug.Log("[SceneInitializer] Game scene built successfully!");
         }
 
         #region 数据资源创建
 
-        /// <summary>
-        /// 创建默认的单位数据和建筑数据
-        /// </summary>
-        private void CreateDefaultDataAssets()
+        private static void CreateDefaultDataAssets()
         {
             // 战士单位
             warriorData = ScriptableObject.CreateInstance<UnitData>();
@@ -147,7 +134,7 @@ namespace CastleWars.Core
         /// <summary>
         /// 获取默认单位数据
         /// </summary>
-        public UnitData GetDefaultUnitData()
+        public static UnitData GetDefaultUnitData()
         {
             return warriorData;
         }
@@ -155,7 +142,7 @@ namespace CastleWars.Core
         /// <summary>
         /// 获取所有建筑数据
         /// </summary>
-        public BuildingData[] GetAllBuildingData()
+        public static BuildingData[] GetAllBuildingData()
         {
             return new BuildingData[] { barracksData, archerRangeData, stableData };
         }
@@ -164,8 +151,11 @@ namespace CastleWars.Core
 
         #region 场景对象创建
 
-        private void CreateCamera()
+        private static void CreateCamera()
         {
+            // 检查是否已有主相机
+            if (Camera.main != null) return;
+
             GameObject cameraObj = new GameObject("Main Camera");
             cameraObj.tag = "MainCamera";
 
@@ -178,15 +168,16 @@ namespace CastleWars.Core
             cameraObj.transform.position = new Vector3(0, 20, 0);
             cameraObj.transform.rotation = Quaternion.Euler(90, 0, 0);
 
-            // 添加AudioListener
             cameraObj.AddComponent<AudioListener>();
 
             Debug.Log("[SceneInitializer] Camera created");
         }
 
-        private void CreateLighting()
+        private static void CreateLighting()
         {
-            // 方向光
+            // 检查是否已有方向光
+            if (FindObjectOfType<Light>() != null) return;
+
             GameObject lightObj = new GameObject("Directional Light");
             Light light = lightObj.AddComponent<Light>();
             light.type = LightType.Directional;
@@ -197,15 +188,16 @@ namespace CastleWars.Core
             Debug.Log("[SceneInitializer] Lighting created");
         }
 
-        private void CreateGround()
+        private static void CreateGround()
         {
-            // 地面
+            // 检查是否已有地面
+            if (GameObject.Find("Ground") != null) return;
+
             GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
             ground.name = "Ground";
             ground.transform.localScale = new Vector3(6, 1, 3);
             ground.transform.position = Vector3.zero;
 
-            // 设置地面材质
             Renderer renderer = ground.GetComponent<Renderer>();
             if (renderer != null)
             {
@@ -214,26 +206,34 @@ namespace CastleWars.Core
                 renderer.material = groundMat;
             }
 
-            // 设置地面图层
             ground.layer = LayerMask.NameToLayer("Default");
 
             Debug.Log("[SceneInitializer] Ground created");
         }
 
-        private void CreateGameLauncher()
+        private static void CreateGameLauncher()
         {
+            // 避免重复创建
+            if (FindObjectOfType<GameLauncher>() != null) return;
+
             GameObject launcherObj = new GameObject("GameLauncher");
-            GameLauncher launcher = launcherObj.AddComponent<GameLauncher>();
+            launcherObj.AddComponent<GameLauncher>();
 
             // 创建LocalUnitSpawner
-            GameObject spawnerObj = new GameObject("LocalUnitSpawner");
-            LocalUnitSpawner spawner = spawnerObj.AddComponent<LocalUnitSpawner>();
+            if (FindObjectOfType<LocalUnitSpawner>() == null)
+            {
+                GameObject spawnerObj = new GameObject("LocalUnitSpawner");
+                spawnerObj.AddComponent<LocalUnitSpawner>();
+            }
 
             Debug.Log("[SceneInitializer] GameLauncher created");
         }
 
-        private void CreateLocalGameUI()
+        private static void CreateLocalGameUI()
         {
+            // 避免重复创建
+            if (FindObjectOfType<LocalGameUI>() != null) return;
+
             // Canvas
             GameObject canvasObj = new GameObject("GameCanvas");
             Canvas canvas = canvasObj.AddComponent<Canvas>();
@@ -382,7 +382,6 @@ namespace CastleWars.Core
             trainBtnRect.anchoredPosition = new Vector2(10, 10);
             trainBtnRect.sizeDelta = new Vector2(160, 45);
 
-            // 按钮文本
             GameObject btnTextObj = CreateUIElement("ButtonText", trainBtnObj.transform);
             Text btnText = btnTextObj.AddComponent<Text>();
             btnText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -444,7 +443,7 @@ namespace CastleWars.Core
             restartTextRect.offsetMin = Vector2.zero;
             restartTextRect.offsetMax = Vector2.zero;
 
-            // 通过反射设置LocalGameUI的私有字段（因为它们是SerializeField）
+            // 通过反射设置LocalGameUI的私有字段
             SetPrivateField(gameUI, "goldText", goldText);
             SetPrivateField(gameUI, "incomeText", incomeText);
             SetPrivateField(gameUI, "player1HealthBar", p1HealthBar);
@@ -469,14 +468,18 @@ namespace CastleWars.Core
             Debug.Log("[SceneInitializer] LocalGameUI created");
         }
 
-        private void CreateQualitySettingsManager()
+        private static void CreateQualitySettingsManager()
         {
+            if (FindObjectOfType<QualitySettingsManager>() != null) return;
+
             GameObject qsmObj = new GameObject("QualitySettingsManager");
             qsmObj.AddComponent<QualitySettingsManager>();
         }
 
-        private void CreateTouchInputHandler()
+        private static void CreateTouchInputHandler()
         {
+            if (FindObjectOfType<TouchInputHandler>() != null) return;
+
             GameObject touchObj = new GameObject("TouchInputHandler");
             touchObj.AddComponent<TouchInputHandler>();
         }
@@ -485,7 +488,7 @@ namespace CastleWars.Core
 
         #region UI辅助方法
 
-        private GameObject CreateUIElement(string name, Transform parent)
+        private static GameObject CreateUIElement(string name, Transform parent)
         {
             GameObject obj = new GameObject(name);
             obj.transform.SetParent(parent, false);
@@ -493,7 +496,7 @@ namespace CastleWars.Core
             return obj;
         }
 
-        private void SetupSliderVisuals(GameObject sliderObj, Color fillColor)
+        private static void SetupSliderVisuals(GameObject sliderObj, Color fillColor)
         {
             Slider slider = sliderObj.GetComponent<Slider>();
 
@@ -532,7 +535,7 @@ namespace CastleWars.Core
             slider.fillRect = fillRect;
         }
 
-        private void SetPrivateField(object obj, string fieldName, object value)
+        private static void SetPrivateField(object obj, string fieldName, object value)
         {
             var field = obj.GetType().GetField(fieldName,
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
