@@ -109,10 +109,14 @@ namespace CastleWars.Core
             Renderer renderer = GetComponent<Renderer>();
             if (renderer != null)
             {
-                Color originalColor = renderer.material.color;
-                renderer.material.color = Color.red;
+                // 访问.material会创建实例，需要缓存并清理
+                Material flashMaterial = renderer.material;
+                Color originalColor = flashMaterial.color;
+                flashMaterial.color = Color.red;
                 yield return new WaitForSeconds(0.1f);
-                renderer.material.color = originalColor;
+                flashMaterial.color = originalColor;
+                // 销毁实例材质以避免泄漏
+                Destroy(flashMaterial, 0.2f);
             }
         }
 
@@ -124,14 +128,14 @@ namespace CastleWars.Core
 
         private void OnTriggerEnter(Collider other)
         {
-            // 检测敌方单位进入
+            // 检测敌方单位穿透城堡 - 作为最后防线
+            // 正常情况下，单位应在攻击范围内通过LocalUnit.AttackTarget()攻击城堡
+            // 只有当单位直接碰撞穿透城堡时才触发此逻辑
             LocalUnit unit = other.GetComponent<LocalUnit>();
-            if (unit != null && unit.OwnerId != OwnerId)
+            if (unit != null && unit.OwnerId != OwnerId && !unit.IsDead)
             {
-                // 单位对城堡造成伤害
+                // 单位碰撞后死亡，对城堡造成伤害
                 TakeDamage(unit.AttackDamage);
-
-                // 销毁单位
                 unit.Die();
             }
         }
