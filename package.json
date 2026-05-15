@@ -4,7 +4,7 @@
   "displayName": "Castle Wars",
   "description": "城堡战争 —— 基于 Cocos Creator 3.x TypeScript 重写，2.5D策略塔防对战单机游戏（含AI对手）",
   "engine": "cocos-creator",
-  "engineVersion": "3.x",
+  "engineVersion": "3.8.5",
   "language": "TypeScript",
   "platforms": ["web-mobile", "wechatgame"],
   "keywords": [

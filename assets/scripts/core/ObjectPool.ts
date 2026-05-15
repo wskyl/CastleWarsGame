@@ -14,7 +14,7 @@ export class ObjectPool {
     constructor(prefab: Prefab, name: string = 'pool') {
         this.prefab = prefab;
         this._name = name;
-        this.pool = new NodePool(name);
+        this.pool = new NodePool();
     }
 
     /**

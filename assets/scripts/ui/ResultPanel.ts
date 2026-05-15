@@ -3,11 +3,10 @@
  * 对局结算界面 —— 显示胜负、双方城堡HP、击杀数、时长
  */
 
-import { _decorator, Component, Label, Button, Node, Color } from 'cc';
+import { _decorator, Component, Label, Button, Node, Color, director, NodeEventType } from 'cc';
 import { GameEvent, Faction } from '../core/GameConstants';
 import { EventBus } from '../core/EventBus';
 import { GameManager, GameResult } from '../core/GameManager';
-import { director } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -49,8 +48,8 @@ export class ResultPanel extends Component {
 
         EventBus.on(GameEvent.GAME_OVER, this._onGameOver, this);
 
-        this.returnMenuButton?.node.on(Button.EventType.CLICK, this._onReturnMenu, this);
-        this.restartButton?.node.on(Button.EventType.CLICK, this._onRestart, this);
+        this.returnMenuButton?.node.on(NodeEventType.TOUCH_END, this._onReturnMenu, this);
+        this.restartButton?.node.on(NodeEventType.TOUCH_END, this._onRestart, this);
     }
 
     onDestroy(): void {

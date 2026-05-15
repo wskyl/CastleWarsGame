@@ -3,7 +3,7 @@
  * 游戏 HUD 主控 —— 顶部城堡血条/计时器、底部金币/建筑菜单、英雄面板
  */
 
-import { _decorator, Component, Label, ProgressBar, Node, Button, Vec2 } from 'cc';
+import { _decorator, Component, Label, ProgressBar, Node, Button, Vec2, NodeEventType } from 'cc';
 import { GameEvent, Faction, WeatherType, GameConstants } from '../core/GameConstants';
 import { EventBus } from '../core/EventBus';
 import { GameManager } from '../core/GameManager';
@@ -69,8 +69,8 @@ export class GameHUD extends Component {
         EventBus.on(GameEvent.INCOME_RATE_CHANGED, this._onIncomeRateChanged, this);
 
         // 注册按钮
-        this.pauseButton?.node.on(Button.EventType.CLICK, this._onPause, this);
-        this.surrenderButton?.node.on(Button.EventType.CLICK, this._onSurrender, this);
+        this.pauseButton?.node.on(NodeEventType.TOUCH_END, this._onPause, this);
+        this.surrenderButton?.node.on(NodeEventType.TOUCH_END, this._onSurrender, this);
 
         // 初始化显示
         this._refreshCastleHP(Faction.PLAYER, GameConstants.CASTLE_HP, GameConstants.CASTLE_HP);

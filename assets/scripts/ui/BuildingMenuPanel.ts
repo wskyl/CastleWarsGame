@@ -3,7 +3,7 @@
  * 建筑菜单面板 —— 显示5个槽位，支持点击选择建造
  */
 
-import { _decorator, Component, Node, Label, Button, Sprite, Color, ScrollView, instantiate, Prefab } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, Color, ScrollView, instantiate, Prefab, NodeEventType } from 'cc';
 import { BuildingConfig } from '../buildings/BuildingData';
 import { BuildingManager } from '../buildings/BuildingManager';
 import { EconomyManager } from '../economy/EconomyManager';
@@ -63,7 +63,7 @@ export class BuildingMenuPanel extends Component {
             const item: SlotUIItem = { slotNode: node, nameLabel, buildButton, buildListNode };
             this._slotItems.push(item);
 
-            buildButton?.node.on(Button.EventType.CLICK, () => this._onSlotClicked(i), this);
+            buildButton?.node.on(NodeEventType.TOUCH_END, () => this._onSlotClicked(i), this);
             if (buildListNode) buildListNode.active = false;
 
             this._refreshSlot(i);
@@ -116,9 +116,9 @@ export class BuildingMenuPanel extends Component {
             if (btn) {
                 const canAfford = gold >= cfg.cost;
                 btn.interactable = canAfford;
-                if (labels[1]) labels[1].color = canAfford ? Color.WHITE : Color.GRAY;
+                if (labels[1]) labels[1].color = canAfford ? Color.WHITE.clone() : Color.GRAY.clone();
 
-                btn.node.on(Button.EventType.CLICK, () => {
+                btn.node.on(NodeEventType.TOUCH_END, () => {
                     this._buildBuilding(cfg, slotIndex);
                 }, this);
             }

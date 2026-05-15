@@ -3,7 +3,7 @@
  * 英雄面板 UI —— 英雄头像、HP条、荣耀值进度、技能按钮（含冷却显示）
  */
 
-import { _decorator, Component, Label, ProgressBar, Button, Node, Vec2, UITransform, EventTouch } from 'cc';
+import { _decorator, Component, Label, ProgressBar, Button, Node, Vec2, UITransform, EventTouch, NodeEventType } from 'cc';
 import { HeroManager } from '../hero/HeroManager';
 import { Faction, GameEvent, GameConstants } from '../core/GameConstants';
 import { EventBus } from '../core/EventBus';
@@ -60,8 +60,8 @@ export class HeroPanel extends Component {
         EventBus.on(GameEvent.HERO_SUMMONED, this._onHeroSummoned, this);
         EventBus.on(GameEvent.HERO_DIED, this._onHeroDied, this);
 
-        this.summonButton?.node.on(Button.EventType.CLICK, this._onSummonClicked, this);
-        this.skillButton?.node.on(Button.EventType.CLICK, this._onSkillClicked, this);
+        this.summonButton?.node.on(NodeEventType.TOUCH_END, this._onSummonClicked, this);
+        this.skillButton?.node.on(NodeEventType.TOUCH_END, this._onSkillClicked, this);
 
         this._refreshGlory(0);
         this._setHeroPanelVisible(false);

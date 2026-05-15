@@ -3,7 +3,7 @@
  * 主菜单 UI —— 开始游戏、选择难度、设置
  */
 
-import { _decorator, Component, Button, Label, Node, director } from 'cc';
+import { _decorator, Component, Button, Label, Node, director, NodeEventType } from 'cc';
 import { AIDifficulty, GameEvent, GameState } from '../core/GameConstants';
 import { GameManager } from '../core/GameManager';
 import { EventBus } from '../core/EventBus';
@@ -40,11 +40,11 @@ export class MainMenu extends Component {
     private _selectedDifficulty: AIDifficulty = AIDifficulty.NORMAL;
 
     onLoad(): void {
-        this.easyButton?.node.on(Button.EventType.CLICK, () => this._selectDifficulty(AIDifficulty.EASY), this);
-        this.normalButton?.node.on(Button.EventType.CLICK, () => this._selectDifficulty(AIDifficulty.NORMAL), this);
-        this.hardButton?.node.on(Button.EventType.CLICK, () => this._selectDifficulty(AIDifficulty.HARD), this);
-        this.startButton?.node.on(Button.EventType.CLICK, this._onStartGame, this);
-        this.settingsButton?.node.on(Button.EventType.CLICK, this._onSettings, this);
+        this.easyButton?.node.on(NodeEventType.TOUCH_END, () => this._selectDifficulty(AIDifficulty.EASY), this);
+        this.normalButton?.node.on(NodeEventType.TOUCH_END, () => this._selectDifficulty(AIDifficulty.NORMAL), this);
+        this.hardButton?.node.on(NodeEventType.TOUCH_END, () => this._selectDifficulty(AIDifficulty.HARD), this);
+        this.startButton?.node.on(NodeEventType.TOUCH_END, this._onStartGame, this);
+        this.settingsButton?.node.on(NodeEventType.TOUCH_END, this._onSettings, this);
 
         if (this.settingsPanel) this.settingsPanel.active = false;
 
