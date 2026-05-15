@@ -1,19 +1,25 @@
 {
   "compilerOptions": {
     "target": "ES2015",
-    "module": "commonjs",
+    "module": "ES2015",
     "lib": ["es2015", "dom"],
     "strict": false,
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
     "moduleResolution": "node",
     "skipLibCheck": true,
-    "outDir": "temp/scripts",
+    "useDefineForClassFields": false,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
     "noImplicitAny": false,
-    "noImplicitReturns": false
+    "noImplicitReturns": false,
+    "paths": {
+      "cc": ["./temp/declarations/cc.d.ts"],
+      "cc/env": ["./temp/declarations/cc.env.d.ts"]
+    }
   },
   "include": [
-    "assets/scripts/**/*.ts"
+    "./assets/**/*.ts"
   ],
   "exclude": [
     "node_modules",

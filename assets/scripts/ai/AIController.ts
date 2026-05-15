@@ -57,11 +57,13 @@ export class AIController extends Component {
     private _getDecisionInterval(): number {
         switch (this._difficulty) {
             case AIDifficulty.EASY:
-                return 5 + Math.random() * 3;   // 5~8秒
+                return 5 + Math.random() * 3;     // 5~8秒
             case AIDifficulty.NORMAL:
-                return 2 + Math.random() * 2;   // 2~4秒
+                return 2 + Math.random() * 2;     // 2~4秒
             case AIDifficulty.HARD:
                 return 0.5 + Math.random() * 0.5; // 0.5~1秒
+            default:
+                return 3;
         }
     }
 
@@ -166,12 +168,13 @@ export class AIController extends Component {
                         score += (heavyCount / totalUnits) * 60;
                     }
                     break;
-                case 'siege_workshop': // 攻城坦克 → 直攻城堡
+                case 'siege_workshop': { // 攻城坦克 → 直攻城堡
                     score += 25;
                     // 玩家有很多建筑时加分
                     const playerBuildingCount = this.buildingManager.getAllBuildings(Faction.PLAYER).length;
                     score += playerBuildingCount * 10;
                     break;
+                }
                 case 'dragon_nest': // 龙 → 最强传奇
                     score += 80;
                     break;
@@ -210,6 +213,8 @@ export class AIController extends Component {
                 return Math.random() < 0.6;
             case AIDifficulty.HARD:
                 return true;
+            default:
+                return false;
         }
     }
 
@@ -220,11 +225,14 @@ export class AIController extends Component {
                 return 'guardian_general'; // 简单选最基础英雄
             case AIDifficulty.NORMAL:
                 return Math.random() < 0.5 ? 'guardian_general' : 'elemental_archmage';
-            case AIDifficulty.HARD:
+            case AIDifficulty.HARD: {
                 // 分析玩家兵种选反制英雄
                 const playerUnits = this.unitManager.getAllAlive(Faction.PLAYER);
                 const hasHeavy = playerUnits.some(u => u.config.armorType === 'heavy' as any);
                 return hasHeavy ? 'elemental_archmage' : 'shadow_hunter';
+            }
+            default:
+                return 'guardian_general';
         }
     }
 }

@@ -3,7 +3,7 @@
  * 游戏 HUD 主控 —— 顶部城堡血条/计时器、底部金币/建筑菜单、英雄面板
  */
 
-import { _decorator, Component, Label, ProgressBar, Node, Button, Vec2 } from 'cc';
+import { _decorator, Component, Label, ProgressBar, Node, Button } from 'cc';
 import { GameEvent, Faction, WeatherType, GameConstants } from '../core/GameConstants';
 import { EventBus } from '../core/EventBus';
 import { GameManager } from '../core/GameManager';

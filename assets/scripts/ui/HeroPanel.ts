@@ -3,12 +3,11 @@
  * 英雄面板 UI —— 英雄头像、HP条、荣耀值进度、技能按钮（含冷却显示）
  */
 
-import { _decorator, Component, Label, ProgressBar, Button, Node, Vec2, UITransform, EventTouch } from 'cc';
+import { _decorator, Component, Label, ProgressBar, Button, Node, Vec3, Camera, EventTouch } from 'cc';
 import { HeroManager } from '../hero/HeroManager';
 import { Faction, GameEvent, GameConstants } from '../core/GameConstants';
 import { EventBus } from '../core/EventBus';
 import { HeroSkillType } from '../hero/HeroData';
-import { GameManager } from '../core/GameManager';
 
 const { ccclass, property } = _decorator;
 
@@ -50,6 +49,10 @@ export class HeroPanel extends Component {
 
     @property({ type: HeroManager })
     heroManager: HeroManager = null!;
+
+    /** 游戏世界摄像机，用于屏幕坐标→世界坐标转换 */
+    @property(Camera)
+    gameCamera: Camera = null!;
 
     // ── 内部 ──────────────────────────────────────────────────
     private _glory: number = 0;
@@ -164,12 +167,19 @@ export class HeroPanel extends Component {
         this._needAimSkill = false;
         this.node.off(Node.EventType.TOUCH_END, this._onAimTouchEnd, this);
 
-        // 将屏幕坐标转换为世界坐标（简化：直接传touch位置）
-        const touchPos = event.getUILocation();
-        // 实际项目中需通过摄像机将 UI 坐标转换为世界坐标
-        this.heroManager.usePlayerHeroSkill(
-            // 粗略转换（实际应使用Camera.screenToWorld）
-            new (require('cc').Vec3)(touchPos.x - 400, 0, touchPos.y - 300)
-        );
+        // 将屏幕坐标转换为世界坐标（通过 Camera.screenToWorld）
+        const screenPos = event.getLocation();
+        const worldPos = new Vec3();
+        if (this.gameCamera) {
+            this.gameCamera.screenToWorld(
+                new Vec3(screenPos.x, screenPos.y, 0),
+                worldPos
+            );
+            worldPos.y = 0; // 投影到地面平面
+        } else {
+            // 未绑定摄像机时的回退：使用粗略坐标映射
+            worldPos.set(screenPos.x - 400, 0, screenPos.y - 300);
+        }
+        this.heroManager.usePlayerHeroSkill(worldPos);
     }
 }

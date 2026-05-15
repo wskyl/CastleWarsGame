@@ -98,15 +98,12 @@ export class BuildingManager extends Component {
         if (slotIndex < 0 || slotIndex >= slots.length) return false;
         if (slots[slotIndex].building !== null) return false;
 
-        // 校验金币
+        // 校验前置条件（先于扣金币，避免无效扣款后再退还的逻辑缺陷）
+        if (!this._checkPrerequisites(faction, config)) return false;
+
+        // 校验并扣除金币
         const economy = EconomyManager.instance;
         if (!economy.spendGold(faction, config.cost)) return false;
-
-        // 校验前置条件
-        if (!this._checkPrerequisites(faction, config)) {
-            economy.spendGold(faction, -config.cost); // 退还（实际调用应在前置检查后）
-            return false;
-        }
 
         // 实例化建筑节点
         const node = instantiate(this.buildingPrefab);

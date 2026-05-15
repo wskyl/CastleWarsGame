@@ -3,7 +3,7 @@
  * 游戏核心管理器 —— 全局单例，协调所有子系统
  */
 
-import { _decorator, Component, director, Director } from 'cc';
+import { _decorator, Component, director } from 'cc';
 import { GameState, GameEvent, Faction, AIDifficulty, WeatherType } from './GameConstants';
 import { EventBus } from './EventBus';
 import { StateMachine } from './StateMachine';

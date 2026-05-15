@@ -43,6 +43,7 @@ export class UnitController extends Component {
     // ── 动态属性（受天气影响） ────────────────────────────────
     private _effectiveMoveSpeed: number = 0;
     private _effectiveRange: number = 0;
+    private _effectiveFlameDamageMult: number = 1.0; // 火焰伤害倍率（雨天减少）
 
     /** 初始化 */
     init(
@@ -193,7 +194,11 @@ export class UnitController extends Component {
     }
 
     private _calcDamage(baseDmg: number, dmgType: DamageType): number {
-        return baseDmg; // 基础伤害，具体减免在 takeDamage 侧计算
+        // 火焰伤害受天气影响（雨天 -30%）
+        if (dmgType === DamageType.FLAME) {
+            return baseDmg * this._effectiveFlameDamageMult;
+        }
+        return baseDmg;
     }
 
     // ── 受到伤害 ──────────────────────────────────────────────
@@ -330,10 +335,12 @@ export class UnitController extends Component {
         const w = weather ?? GameManager.instance?.weather ?? WeatherType.CLEAR;
         let speedMult = 1.0;
         let rangeMult = 1.0;
+        let flameMult = 1.0;
 
         switch (w) {
             case WeatherType.RAIN:
                 speedMult = 0.8;
+                flameMult = 0.7; // 雨天火焰伤害 -30%
                 break;
             case WeatherType.FOG:
                 rangeMult = 0.6;
@@ -348,6 +355,7 @@ export class UnitController extends Component {
 
         this._effectiveMoveSpeed = this._config.moveSpeed * speedMult;
         this._effectiveRange = this._config.attackRange * rangeMult;
+        this._effectiveFlameDamageMult = flameMult;
 
         // 刺客在浓雾中潜行效果增强（由 UnitManager 额外处理）
     }

@@ -4,8 +4,7 @@
  */
 
 import { _decorator, Component } from 'cc';
-import { WeatherType, GameEvent, GameConstants } from '../core/GameConstants';
-import { EventBus } from '../core/EventBus';
+import { WeatherType, GameConstants } from '../core/GameConstants';
 import { GameManager } from '../core/GameManager';
 
 const { ccclass, property } = _decorator;
@@ -122,9 +121,8 @@ export class WeatherSystem extends Component {
                 Math.random() * (this.MAX_DURATION - this.MIN_DURATION);
         }
 
-        // 通知 GameManager 和所有监听者
+        // 通知 GameManager（内部统一广播 WEATHER_CHANGED，避免重复触发）
         GameManager.instance.setWeather(weather);
-        EventBus.emit(GameEvent.WEATHER_CHANGED, weather);
     }
 
     // ── 强制设置（调试/测试用） ────────────────────────────────

@@ -3,11 +3,11 @@
  * 建筑菜单面板 —— 显示5个槽位，支持点击选择建造
  */
 
-import { _decorator, Component, Node, Label, Button, Sprite, Color, ScrollView, instantiate, Prefab } from 'cc';
+import { _decorator, Component, Node, Label, Button, Sprite, Color, instantiate, Prefab } from 'cc';
 import { BuildingConfig } from '../buildings/BuildingData';
 import { BuildingManager } from '../buildings/BuildingManager';
 import { EconomyManager } from '../economy/EconomyManager';
-import { Faction, GameEvent, BuildingTier } from '../core/GameConstants';
+import { Faction, GameEvent } from '../core/GameConstants';
 import { EventBus } from '../core/EventBus';
 
 const { ccclass, property } = _decorator;
