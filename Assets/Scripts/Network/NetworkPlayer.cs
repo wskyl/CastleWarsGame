@@ -1,169 +1,245 @@
 using UnityEngine;
-using CastleWars.Economy;
-
-#if UNITY_NETCODE
+using System;
 using Unity.Netcode;
-#endif
+using CastleWars.Economy;
 
 namespace CastleWars.Core
 {
     /// <summary>
-    /// 网络玩家 - 管理玩家的网络同步和游戏逻辑
-    /// 支持本地模式和网络模式
+    /// 网络玩家控制器
+    /// 管理玩家信息、经济系统、建筑系统的初始化
     /// </summary>
-#if UNITY_NETCODE
     public class NetworkPlayer : NetworkBehaviour
-#else
-    public class NetworkPlayer : MonoBehaviour
-#endif
     {
         [Header("玩家信息")]
-#if UNITY_NETCODE
-        public NetworkVariable<int> playerId = new NetworkVariable<int>();
-        public NetworkVariable<string> playerName = new NetworkVariable<string>();
-#else
-        private int _playerId;
-        private string _playerName = "";
-        public int PlayerIdValue
-        {
-            get => _playerId;
-            set => _playerId = value;
-        }
-        public string PlayerNameValue
-        {
-            get => _playerName;
-            set => _playerName = value;
-        }
-#endif
+        private NetworkVariable<int> _playerId = new NetworkVariable<int>(
+            0,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
-        [Header("组件")]
-        private PlayerEconomy economy;
-        private BuildingManager buildingManager;
+        private NetworkVariable<FixedString64Bytes> _playerName = new NetworkVariable<FixedString64Bytes>(
+            default,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
-        [Header("城堡")]
-        public GameObject castlePrefab;
-        private GameObject castle;
+        private NetworkVariable<bool> _isReady = new NetworkVariable<bool>(
+            false,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Server
+        );
 
-        // 本地模式判断
-        private bool IsLocalMode => LocalGameMode.IsLocalMode;
+        // 组件引用
+        private PlayerEconomy _economy;
+        private BuildingManager _buildingManager;
+
+        // 事件
+        public event Action<int> OnPlayerIdChanged;
+        public event Action<string> OnPlayerNameChanged;
+        public event Action<bool> OnReadyStateChanged;
+
+        // 属性
+        public int PlayerId => _playerId.Value;
+        public string PlayerName => _playerName.Value.ToString();
+        public bool IsReady => _isReady.Value;
 
         private void Awake()
         {
-            economy = GetComponent<PlayerEconomy>();
-            buildingManager = GetComponent<BuildingManager>();
+            _economy = GetComponent<PlayerEconomy>();
+            _buildingManager = GetComponent<BuildingManager>();
         }
 
-#if UNITY_NETCODE
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
 
-            if (IsServer)
-            {
-                SpawnCastleNetwork();
-            }
-
-            if (buildingManager != null)
-            {
-                buildingManager.playerId = playerId.Value;
-            }
+            // 订阅网络变量变化
+            _playerId.OnValueChanged += HandlePlayerIdChanged;
+            _playerName.OnValueChanged += HandlePlayerNameChanged;
+            _isReady.OnValueChanged += HandleReadyStateChanged;
 
             if (IsOwner)
             {
                 InitializeLocalPlayer();
             }
-        }
 
-        private void SpawnCastleNetwork()
-        {
-            if (castlePrefab == null) return;
-
-            Vector3 castlePos = playerId.Value == 1
-                ? new Vector3(-20, 0, 0)
-                : new Vector3(20, 0, 0);
-
-            castle = Instantiate(castlePrefab, castlePos, Quaternion.identity);
-
-            CastleController castleController = castle.GetComponent<CastleController>();
-            if (castleController != null)
+            // 初始化组件
+            if (_buildingManager != null)
             {
-                castleController.ownerId = playerId.Value;
+                _buildingManager.Initialize(_playerId.Value);
             }
 
-            NetworkObject netObj = castle.GetComponent<NetworkObject>();
-            if (netObj != null)
+            if (_economy != null)
             {
-                netObj.Spawn();
+                _economy.Initialize(_playerId.Value);
             }
+
+            Debug.Log($"[NetworkPlayer] 玩家 {_playerId.Value} 网络生成完成");
         }
 
         public override void OnNetworkDespawn()
         {
             base.OnNetworkDespawn();
 
-            if (IsOwner && economy != null)
+            _playerId.OnValueChanged -= HandlePlayerIdChanged;
+            _playerName.OnValueChanged -= HandlePlayerNameChanged;
+            _isReady.OnValueChanged -= HandleReadyStateChanged;
+
+            // 清理事件订阅
+            if (_economy != null)
             {
-                economy.OnGoldChanged -= OnGoldChanged;
-                economy.OnIncomeChanged -= OnIncomeChanged;
+                _economy.OnGoldChanged -= OnGoldChanged;
+                _economy.OnIncomeChanged -= OnIncomeChanged;
             }
         }
-#endif
 
-        private void Start()
+        /// <summary>
+        /// 初始化玩家（服务器调用）
+        /// </summary>
+        public void Initialize(int playerId)
         {
-            // 本地模式初始化
-            if (IsLocalMode)
-            {
-                InitializeLocalMode();
-            }
+            if (!IsServer) return;
+
+            _playerId.Value = playerId;
+            _playerName.Value = $"Player {playerId}";
+
+            Debug.Log($"[NetworkPlayer] 初始化玩家: {playerId}");
         }
 
-        private void InitializeLocalMode()
+        /// <summary>
+        /// 设置玩家名称
+        /// </summary>
+        [ServerRpc]
+        public void SetPlayerNameServerRpc(string name)
         {
-            if (buildingManager != null)
-            {
-#if UNITY_NETCODE
-                buildingManager.playerId = playerId.Value;
-#else
-                buildingManager.playerId = _playerId;
-#endif
-            }
-
-            InitializeLocalPlayer();
+            _playerName.Value = name;
         }
+
+        /// <summary>
+        /// 设置准备状态
+        /// </summary>
+        [ServerRpc]
+        public void SetReadyServerRpc(bool ready)
+        {
+            _isReady.Value = ready;
+        }
+
+        #region 本地玩家初始化
 
         private void InitializeLocalPlayer()
         {
-#if UNITY_NETCODE
-            Debug.Log($"Local player initialized: Player {playerId.Value}");
-#else
-            Debug.Log($"Local player initialized: Player {_playerId}");
-#endif
+            Debug.Log($"[NetworkPlayer] 本地玩家初始化: Player {_playerId.Value}");
 
-            if (economy != null)
+            // 订阅经济系统事件
+            if (_economy != null)
             {
-                economy.OnGoldChanged += OnGoldChanged;
-                economy.OnIncomeChanged += OnIncomeChanged;
+                _economy.OnGoldChanged += OnGoldChanged;
+                _economy.OnIncomeChanged += OnIncomeChanged;
+            }
+
+            // 设置相机跟随等本地操作
+            SetupLocalCamera();
+        }
+
+        private void SetupLocalCamera()
+        {
+            // 与 SceneInitializer 保持一致：透视投影 + 约 60° 俯斜角 RTS 视角
+            // 联机模式下两位玩家共享同一相机参数，均使用居中的 3/4 俯视角度
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                mainCamera.orthographic = false;
+                mainCamera.fieldOfView = 55f;
+                mainCamera.nearClipPlane = 0.3f;
+                mainCamera.farClipPlane = 200f;
+
+                mainCamera.transform.position = new Vector3(0, 17, -10);
+                mainCamera.transform.rotation = Quaternion.Euler(60, 0, 0);
             }
         }
 
+        #endregion
+
+        #region 经济事件处理
+
         private void OnGoldChanged(int newGold)
         {
-            Debug.Log($"Gold: {newGold}");
+            // 可以在这里更新UI或触发其他逻辑
+            Debug.Log($"[NetworkPlayer] Player {_playerId.Value} 金币: {newGold}");
         }
 
         private void OnIncomeChanged(int newIncome)
         {
-            Debug.Log($"Income: {newIncome}/s");
+            Debug.Log($"[NetworkPlayer] Player {_playerId.Value} 收入: {newIncome}/秒");
         }
 
-        private void OnDestroy()
+        #endregion
+
+        #region 网络变量变化处理
+
+        private void HandlePlayerIdChanged(int previousValue, int newValue)
         {
-            if (economy != null)
+            OnPlayerIdChanged?.Invoke(newValue);
+
+            // 重新初始化依赖玩家ID的组件
+            if (_buildingManager != null)
             {
-                economy.OnGoldChanged -= OnGoldChanged;
-                economy.OnIncomeChanged -= OnIncomeChanged;
+                _buildingManager.Initialize(newValue);
+            }
+
+            if (_economy != null)
+            {
+                _economy.Initialize(newValue);
             }
         }
+
+        private void HandlePlayerNameChanged(FixedString64Bytes previousValue, FixedString64Bytes newValue)
+        {
+            OnPlayerNameChanged?.Invoke(newValue.ToString());
+        }
+
+        private void HandleReadyStateChanged(bool previousValue, bool newValue)
+        {
+            OnReadyStateChanged?.Invoke(newValue);
+        }
+
+        #endregion
+
+        #region 工具方法
+
+        /// <summary>
+        /// 获取玩家经济组件
+        /// </summary>
+        public PlayerEconomy GetEconomy()
+        {
+            return _economy;
+        }
+
+        /// <summary>
+        /// 获取建筑管理器
+        /// </summary>
+        public BuildingManager GetBuildingManager()
+        {
+            return _buildingManager;
+        }
+
+        /// <summary>
+        /// 检查是否是本地玩家
+        /// </summary>
+        public bool IsLocalPlayer()
+        {
+            return IsOwner;
+        }
+
+        /// <summary>
+        /// 获取敌方玩家ID
+        /// </summary>
+        public int GetEnemyPlayerId()
+        {
+            return _playerId.Value == 1 ? 2 : 1;
+        }
+
+        #endregion
     }
 }

@@ -4,25 +4,54 @@ using UnityEngine.EventSystems;
 namespace CastleWars.UI
 {
     /// <summary>
-    /// 触摸输入处理器 - 处理移动端的触摸操作
+    /// 触摸输入处理器
+    /// 处理移动端触摸操作、相机控制、建筑槽位点击
     /// </summary>
     public class TouchInputHandler : MonoBehaviour
     {
-        [Header("相机")]
+        [Header("相机引用")]
+        [Tooltip("主相机")]
         [SerializeField] private Camera mainCamera;
 
-        [Header("相机控制")]
+        [Header("相机平移")]
+        [Tooltip("平移速度")]
         [SerializeField] private float panSpeed = 20f;
+
+        [Tooltip("平移阻尼")]
+        [SerializeField] private float panDamping = 5f;
+
+        [Header("相机缩放")]
+        [Tooltip("缩放速度")]
         [SerializeField] private float zoomSpeed = 0.5f;
+
+        [Tooltip("最小缩放")]
         [SerializeField] private float minZoom = 5f;
+
+        [Tooltip("最大缩放")]
         [SerializeField] private float maxZoom = 20f;
 
-        [Header("边界")]
+        [Header("边界限制")]
+        [Tooltip("X轴最小值")]
         [SerializeField] private float minX = -30f;
+
+        [Tooltip("X轴最大值")]
         [SerializeField] private float maxX = 30f;
 
-        private Vector3 lastTouchPosition;
-        private bool isDragging = false;
+        [Header("点击检测")]
+        [Tooltip("点击检测的射线距离")]
+        [SerializeField] private float raycastDistance = 100f;
+
+        [Tooltip("可点击的图层")]
+        [SerializeField] private LayerMask clickableLayer;
+
+        // 触摸状态
+        private Vector3 _lastTouchPosition;
+        private bool _isDragging = false;
+        private float _dragThreshold = 10f; // 拖拽阈值（像素）
+        private Vector3 _touchStartPosition;
+
+        // 相机惯性
+        private Vector3 _velocity;
 
         private void Start()
         {
@@ -35,17 +64,23 @@ namespace CastleWars.UI
         private void Update()
         {
             HandleTouchInput();
+            ApplyCameraInertia();
         }
 
+        #region 输入处理
+
+        /// <summary>
+        /// 处理触摸输入
+        /// </summary>
         private void HandleTouchInput()
         {
-            // 处理触摸输入
+            // 单指触摸
             if (Input.touchCount == 1)
             {
                 Touch touch = Input.GetTouch(0);
 
                 // 检查是否点击在UI上
-                if (EventSystem.current.IsPointerOverGameObject(touch.fingerId))
+                if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(touch.fingerId))
                 {
                     return;
                 }
@@ -53,123 +88,142 @@ namespace CastleWars.UI
                 switch (touch.phase)
                 {
                     case TouchPhase.Began:
-                        lastTouchPosition = touch.position;
-                        isDragging = true;
+                        OnTouchBegan(touch.position);
                         break;
 
                     case TouchPhase.Moved:
-                        if (isDragging)
-                        {
-                            PanCamera(touch);
-                        }
+                        OnTouchMoved(touch);
                         break;
 
                     case TouchPhase.Ended:
-                        isDragging = false;
-                        // 检测点击建筑槽位
-                        DetectBuildingSlotTap(touch.position);
+                        OnTouchEnded(touch.position);
+                        break;
+
+                    case TouchPhase.Canceled:
+                        _isDragging = false;
                         break;
                 }
             }
+            // 双指缩放
             else if (Input.touchCount == 2)
             {
-                // 双指缩放
-                Touch touch1 = Input.GetTouch(0);
-                Touch touch2 = Input.GetTouch(1);
-
-                Vector2 touch1PrevPos = touch1.position - touch1.deltaPosition;
-                Vector2 touch2PrevPos = touch2.position - touch2.deltaPosition;
-
-                float prevMagnitude = (touch1PrevPos - touch2PrevPos).magnitude;
-                float currentMagnitude = (touch1.position - touch2.position).magnitude;
-
-                float difference = currentMagnitude - prevMagnitude;
-
-                ZoomCamera(difference * zoomSpeed * Time.deltaTime);
+                HandlePinchZoom();
             }
 
             // PC端测试：鼠标控制
-#if UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE
             HandleMouseInput();
 #endif
         }
 
-        private void PanCamera(Touch touch)
+        /// <summary>
+        /// 触摸开始
+        /// </summary>
+        private void OnTouchBegan(Vector2 position)
         {
-            Vector3 delta = mainCamera.ScreenToWorldPoint(touch.position) -
-                           mainCamera.ScreenToWorldPoint(lastTouchPosition);
-
-            Vector3 newPos = mainCamera.transform.position - new Vector3(delta.x, 0, 0);
-
-            // 限制边界
-            newPos.x = Mathf.Clamp(newPos.x, minX, maxX);
-
-            mainCamera.transform.position = newPos;
-            lastTouchPosition = touch.position;
+            _lastTouchPosition = position;
+            _touchStartPosition = position;
+            _isDragging = true;
+            _velocity = Vector3.zero;
         }
 
-        private void ZoomCamera(float increment)
+        /// <summary>
+        /// 触摸移动
+        /// </summary>
+        private void OnTouchMoved(Touch touch)
         {
-            if (mainCamera.orthographic)
+            if (!_isDragging) return;
+
+            // 计算拖拽距离
+            float dragDistance = Vector2.Distance(touch.position, _touchStartPosition);
+
+            // 超过阈值才执行相机平移
+            if (dragDistance > _dragThreshold)
             {
-                mainCamera.orthographicSize = Mathf.Clamp(
-                    mainCamera.orthographicSize - increment,
-                    minZoom,
-                    maxZoom
-                );
+                PanCamera(touch.position);
             }
-            else
-            {
-                Vector3 pos = mainCamera.transform.position;
-                pos.z = Mathf.Clamp(pos.z - increment, -maxZoom, -minZoom);
-                mainCamera.transform.position = pos;
-            }
+
+            _lastTouchPosition = touch.position;
         }
 
-        private void DetectBuildingSlotTap(Vector2 screenPosition)
+        /// <summary>
+        /// 触摸结束
+        /// </summary>
+        private void OnTouchEnded(Vector2 position)
         {
-            Ray ray = mainCamera.ScreenPointToRay(screenPosition);
-            RaycastHit hit;
+            _isDragging = false;
 
-            if (Physics.Raycast(ray, out hit, 100f))
+            // 如果移动距离小于阈值，视为点击
+            float dragDistance = Vector2.Distance(position, _touchStartPosition);
+            if (dragDistance < _dragThreshold)
             {
-                BuildingSlot slot = hit.collider.GetComponent<BuildingSlot>();
-                if (slot != null)
-                {
-                    slot.OnSlotClicked();
-                }
+                DetectClick(position);
             }
         }
 
+        /// <summary>
+        /// 处理双指缩放
+        /// </summary>
+        private void HandlePinchZoom()
+        {
+            Touch touch1 = Input.GetTouch(0);
+            Touch touch2 = Input.GetTouch(1);
+
+            // 计算前一帧的距离
+            Vector2 touch1PrevPos = touch1.position - touch1.deltaPosition;
+            Vector2 touch2PrevPos = touch2.position - touch2.deltaPosition;
+
+            float prevMagnitude = (touch1PrevPos - touch2PrevPos).magnitude;
+            float currentMagnitude = (touch1.position - touch2.position).magnitude;
+
+            float difference = currentMagnitude - prevMagnitude;
+
+            ZoomCamera(difference * zoomSpeed * Time.deltaTime);
+        }
+
+        #endregion
+
+        #region 鼠标输入（PC端）
+
+        /// <summary>
+        /// 处理鼠标输入
+        /// </summary>
         private void HandleMouseInput()
         {
-            // 鼠标拖拽
+            // 检查UI
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                return;
+            }
+
+            // 鼠标左键
             if (Input.GetMouseButtonDown(0))
             {
-                lastTouchPosition = Input.mousePosition;
-                isDragging = true;
+                _lastTouchPosition = Input.mousePosition;
+                _touchStartPosition = Input.mousePosition;
+                _isDragging = true;
+                _velocity = Vector3.zero;
             }
             else if (Input.GetMouseButton(0))
             {
-                if (isDragging && !EventSystem.current.IsPointerOverGameObject())
+                if (_isDragging)
                 {
-                    Vector3 delta = mainCamera.ScreenToWorldPoint(Input.mousePosition) -
-                                   mainCamera.ScreenToWorldPoint(lastTouchPosition);
-
-                    Vector3 newPos = mainCamera.transform.position - new Vector3(delta.x, 0, 0);
-                    newPos.x = Mathf.Clamp(newPos.x, minX, maxX);
-
-                    mainCamera.transform.position = newPos;
-                    lastTouchPosition = Input.mousePosition;
+                    float dragDistance = Vector2.Distance(Input.mousePosition, _touchStartPosition);
+                    if (dragDistance > _dragThreshold)
+                    {
+                        PanCamera(Input.mousePosition);
+                    }
+                    _lastTouchPosition = Input.mousePosition;
                 }
             }
             else if (Input.GetMouseButtonUp(0))
             {
-                isDragging = false;
+                _isDragging = false;
 
-                if (!EventSystem.current.IsPointerOverGameObject())
+                float dragDistance = Vector2.Distance(Input.mousePosition, _touchStartPosition);
+                if (dragDistance < _dragThreshold)
                 {
-                    DetectBuildingSlotTap(Input.mousePosition);
+                    DetectClick(Input.mousePosition);
                 }
             }
 
@@ -180,5 +234,152 @@ namespace CastleWars.UI
                 ZoomCamera(scroll * 10f);
             }
         }
+
+        #endregion
+
+        #region 相机控制
+
+        /// <summary>
+        /// 相机平移
+        /// </summary>
+        private void PanCamera(Vector2 currentPosition)
+        {
+            if (mainCamera == null) return;
+
+            Vector3 deltaWorld = mainCamera.ScreenToWorldPoint(currentPosition) -
+                                mainCamera.ScreenToWorldPoint(_lastTouchPosition);
+
+            Vector3 newPos = mainCamera.transform.position - new Vector3(deltaWorld.x, 0, 0);
+
+            // 限制边界
+            newPos.x = Mathf.Clamp(newPos.x, minX, maxX);
+
+            // 记录速度（用于惯性）
+            _velocity = (mainCamera.transform.position - newPos) / Time.deltaTime;
+
+            mainCamera.transform.position = newPos;
+        }
+
+        /// <summary>
+        /// 相机缩放
+        /// </summary>
+        private void ZoomCamera(float increment)
+        {
+            if (mainCamera == null) return;
+
+            if (mainCamera.orthographic)
+            {
+                // 正交相机
+                mainCamera.orthographicSize = Mathf.Clamp(
+                    mainCamera.orthographicSize - increment,
+                    minZoom,
+                    maxZoom
+                );
+            }
+            else
+            {
+                // 透视相机
+                Vector3 pos = mainCamera.transform.position;
+                pos.y = Mathf.Clamp(pos.y - increment, minZoom, maxZoom);
+                mainCamera.transform.position = pos;
+            }
+        }
+
+        /// <summary>
+        /// 应用相机惯性
+        /// </summary>
+        private void ApplyCameraInertia()
+        {
+            if (_isDragging || mainCamera == null) return;
+
+            // 衰减速度
+            _velocity = Vector3.Lerp(_velocity, Vector3.zero, Time.deltaTime * panDamping);
+
+            if (_velocity.magnitude > 0.01f)
+            {
+                Vector3 newPos = mainCamera.transform.position - _velocity * Time.deltaTime;
+                newPos.x = Mathf.Clamp(newPos.x, minX, maxX);
+                mainCamera.transform.position = newPos;
+            }
+        }
+
+        #endregion
+
+        #region 点击检测
+
+        /// <summary>
+        /// 检测点击
+        /// </summary>
+        private void DetectClick(Vector2 screenPosition)
+        {
+            if (mainCamera == null) return;
+
+            Ray ray = mainCamera.ScreenPointToRay(screenPosition);
+            RaycastHit hit;
+
+            if (Physics.Raycast(ray, out hit, raycastDistance, clickableLayer))
+            {
+                // 检测建筑槽位
+                BuildingSlot slot = hit.collider.GetComponent<BuildingSlot>();
+                if (slot != null)
+                {
+                    slot.OnSlotClicked_Handler();
+                    return;
+                }
+
+                // 可以添加其他可点击对象的检测
+                Debug.Log($"[TouchInputHandler] 点击: {hit.collider.gameObject.name}");
+            }
+        }
+
+        #endregion
+
+        #region 公共方法
+
+        /// <summary>
+        /// 设置相机边界
+        /// </summary>
+        public void SetCameraBounds(float min, float max)
+        {
+            minX = min;
+            maxX = max;
+        }
+
+        /// <summary>
+        /// 设置缩放范围
+        /// </summary>
+        public void SetZoomRange(float min, float max)
+        {
+            minZoom = min;
+            maxZoom = max;
+        }
+
+        /// <summary>
+        /// 移动相机到指定位置
+        /// </summary>
+        public void MoveCameraTo(float x)
+        {
+            if (mainCamera == null) return;
+
+            Vector3 pos = mainCamera.transform.position;
+            pos.x = Mathf.Clamp(x, minX, maxX);
+            mainCamera.transform.position = pos;
+        }
+
+        /// <summary>
+        /// 启用/禁用输入
+        /// </summary>
+        public void SetInputEnabled(bool enabled)
+        {
+            this.enabled = enabled;
+
+            if (!enabled)
+            {
+                _isDragging = false;
+                _velocity = Vector3.zero;
+            }
+        }
+
+        #endregion
     }
 }
